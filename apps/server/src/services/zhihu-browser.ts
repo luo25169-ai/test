@@ -25,6 +25,7 @@ export interface BrowserPage {
   waitForLoadState(state: "domcontentloaded" | "load" | "networkidle"): Promise<void>;
   url(): string;
   locator(selector: string): BrowserLocator;
+  getByPlaceholder(text: string, options?: { exact?: boolean }): BrowserLocator;
   getByText(text: string, options?: { exact?: boolean }): BrowserLocator;
   isClosed(): boolean;
   bringToFront?(): Promise<void>;
@@ -118,6 +119,9 @@ function wrapPage(page: any): BrowserPage {
     locator(selector: string) {
       return wrapLocator(page.locator(selector));
     },
+    getByPlaceholder(text: string, options?: { exact?: boolean }) {
+      return wrapLocator(page.getByPlaceholder(text, options));
+    },
     getByText(text: string, options?: { exact?: boolean }) {
       return wrapLocator(page.getByText(text, options));
     },
@@ -152,6 +156,16 @@ async function findFirstVisibleText(page: BrowserPage, texts: string[]): Promise
   return null;
 }
 
+async function findFirstVisiblePlaceholder(page: BrowserPage, placeholders: string[]): Promise<BrowserLocator | null> {
+  for (const placeholder of placeholders) {
+    const locator = page.getByPlaceholder(placeholder, { exact: false });
+    if ((await locator.count()) > 0 && (await locator.first().isVisible())) {
+      return locator.first();
+    }
+  }
+  return null;
+}
+
 async function isZhihuLoginPage(page: BrowserPage): Promise<boolean> {
   const currentUrl = page.url();
   if (currentUrl.includes("/signin")) return true;
@@ -160,6 +174,13 @@ async function isZhihuLoginPage(page: BrowserPage): Promise<boolean> {
 
 async function fillEditorField(page: BrowserPage, selectors: string[], value: string): Promise<boolean> {
   const locator = await findFirstVisibleLocator(page, selectors);
+  if (!locator) return false;
+  await locator.fill(value);
+  return true;
+}
+
+async function fillEditorFieldByPlaceholder(page: BrowserPage, placeholders: string[], value: string): Promise<boolean> {
+  const locator = await findFirstVisiblePlaceholder(page, placeholders);
   if (!locator) return false;
   await locator.fill(value);
   return true;
@@ -233,12 +254,21 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
         };
       }
 
-      const titleFilled = await fillEditorField(page, [
-        'textarea[placeholder*="标题"]',
-        'input[placeholder*="标题"]',
-        'textarea[placeholder*="写标题"]',
-        'input[placeholder*="写标题"]'
-      ], draft.title);
+      const titleFilled =
+        (await fillEditorFieldByPlaceholder(page, ["请输入标题", "标题"], draft.title)) ||
+        (await fillEditorField(page, [
+          'h1[contenteditable="true"]',
+          'div[contenteditable="true"][data-placeholder*="标题"]',
+          'div[contenteditable="true"][placeholder*="标题"]',
+          'div[contenteditable="true"][aria-label*="标题"]',
+          'div[contenteditable="true"][role="textbox"]',
+          'textarea[placeholder*="请输入标题"]',
+          'input[placeholder*="请输入标题"]',
+          'textarea[placeholder*="标题"]',
+          'input[placeholder*="标题"]',
+          ".WriteIndex-titleInput textarea",
+          ".WriteIndex-titleInput input"
+        ], draft.title));
       if (!titleFilled) {
         return {
           status: "NEEDS_USER_ACTION",
@@ -246,12 +276,17 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
         };
       }
 
-      const bodyFilled = await fillEditorField(page, [
-        'textarea[placeholder*="正文"]',
-        'textarea[placeholder*="内容"]',
-        'div[contenteditable="true"]',
-        'textarea'
-      ], draft.body);
+      const bodyFilled =
+        (await fillEditorFieldByPlaceholder(page, ["请输入正文", "正文"], draft.body)) ||
+        (await fillEditorField(page, [
+          ".public-DraftEditor-content",
+          '[data-slate-editor="true"]',
+          "[data-slate-editor]",
+          'div[contenteditable="true"]',
+          'textarea[placeholder*="正文"]',
+          'textarea[placeholder*="内容"]',
+          'textarea'
+        ], draft.body));
       if (!bodyFilled) {
         return {
           status: "NEEDS_USER_ACTION",
