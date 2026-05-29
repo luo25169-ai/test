@@ -14,7 +14,7 @@ import {
   Sparkles,
   X
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AdaptationResult, DraftContent, PublishTask } from "./api";
 import { adaptContent, openPlatformLogin, publishContent } from "./api";
 
@@ -40,6 +40,38 @@ function classNames(...items: Array<string | false | undefined>) {
   return items.filter(Boolean).join(" ");
 }
 
+const accountStatusesStorageKey = "contentflow.accountStatuses";
+const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
+
+const defaultAccountStatuses: Record<string, AccountStatus> = {
+  wechat: "NEEDS_LOGIN",
+  zhihu: "CONNECTED",
+  bilibili: "NEEDS_LOGIN",
+  rednote: "NEEDS_LOGIN"
+};
+
+function readStoredAccountStatuses(): Record<string, AccountStatus> {
+  try {
+    const raw = localStorage.getItem(accountStatusesStorageKey);
+    if (!raw) return defaultAccountStatuses;
+    const parsed = JSON.parse(raw) as Record<string, AccountStatus>;
+    return { ...defaultAccountStatuses, ...parsed };
+  } catch {
+    return defaultAccountStatuses;
+  }
+}
+
+function readStoredLoginOpenedPlatforms(): string[] {
+  try {
+    const raw = localStorage.getItem(loginOpenedPlatformsStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [draft, setDraft] = useState<DraftContent>(initialDraft);
@@ -52,19 +84,22 @@ export default function App() {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [accountNotice, setAccountNotice] = useState("");
-  const [accountStatuses, setAccountStatuses] = useState<Record<string, AccountStatus>>({
-    wechat: "NEEDS_LOGIN",
-    zhihu: "CONNECTED",
-    bilibili: "NEEDS_LOGIN",
-    rednote: "NEEDS_LOGIN"
-  });
-  const [loginOpenedPlatforms, setLoginOpenedPlatforms] = useState<string[]>([]);
+  const [accountStatuses, setAccountStatuses] = useState<Record<string, AccountStatus>>(readStoredAccountStatuses);
+  const [loginOpenedPlatforms, setLoginOpenedPlatforms] = useState<string[]>(readStoredLoginOpenedPlatforms);
   const [pendingPublishPlatform, setPendingPublishPlatform] = useState<string | null>(null);
 
   const activeContent = useMemo(
     () => adapted.find((item) => item.platformId === activePreview) ?? adapted[0],
     [activePreview, adapted]
   );
+
+  useEffect(() => {
+    localStorage.setItem(accountStatusesStorageKey, JSON.stringify(accountStatuses));
+  }, [accountStatuses]);
+
+  useEffect(() => {
+    localStorage.setItem(loginOpenedPlatformsStorageKey, JSON.stringify(loginOpenedPlatforms));
+  }, [loginOpenedPlatforms]);
 
   async function handleAdapt() {
     setError("");
