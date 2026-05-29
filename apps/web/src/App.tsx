@@ -55,9 +55,10 @@ export default function App() {
   const [accountStatuses, setAccountStatuses] = useState<Record<string, AccountStatus>>({
     wechat: "NEEDS_LOGIN",
     zhihu: "CONNECTED",
-    bilibili: "CONNECTED",
-    rednote: "CONNECTED"
+    bilibili: "NEEDS_LOGIN",
+    rednote: "NEEDS_LOGIN"
   });
+  const [loginOpenedPlatforms, setLoginOpenedPlatforms] = useState<string[]>([]);
   const [pendingPublishPlatform, setPendingPublishPlatform] = useState<string | null>(null);
 
   const activeContent = useMemo(
@@ -140,7 +141,7 @@ export default function App() {
     try {
       const result = await openPlatformLogin(platformId);
       setAccountNotice(`${platformName}：${result.message}`);
-      setAccountStatuses((current) => ({ ...current, [platformId]: "CONNECTED" }));
+      setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
     } catch (err) {
       setError(err instanceof Error ? err.message : "打开登录页失败");
     }
@@ -384,12 +385,23 @@ export default function App() {
                       发布到{platform.name}
                     </button>
                   ) : (
-                    <button
-                      onClick={() => handleOpenLogin(platform.id, platform.name)}
-                      className="rounded-md border border-line px-3 py-2 text-sm"
-                    >
-                      打开平台登录页
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleOpenLogin(platform.id, platform.name)}
+                        className="rounded-md border border-line px-3 py-2 text-sm"
+                      >
+                        {loginOpenedPlatforms.includes(platform.id) ? "重新打开登录页" : "打开平台登录页"}
+                      </button>
+                      {loginOpenedPlatforms.includes(platform.id) && (
+                        <button
+                          onClick={() => setAccountStatuses((current) => ({ ...current, [platform.id]: "CONNECTED" }))}
+                          className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white"
+                        >
+                          <CheckCircle2 size={16} />
+                          我已完成登录
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

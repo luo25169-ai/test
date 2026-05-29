@@ -1,5 +1,6 @@
 import cors from "cors";
 import "./env.js";
+import { execFile } from "node:child_process";
 import express from "express";
 import { z } from "zod";
 import { adaptForPlatforms, adaptForPlatformsWithAi, getPlatforms } from "./platforms/platform-registry.js";
@@ -10,6 +11,28 @@ import { createZhihuBrowserPublisher } from "./services/zhihu-browser.js";
 
 const wechatBrowserPublisher = createWechatBrowserPublisher();
 const zhihuBrowserPublisher = createZhihuBrowserPublisher();
+
+const platformLoginUrls = {
+  wechat: "https://mp.weixin.qq.com/",
+  zhihu: "https://www.zhihu.com/signin",
+  bilibili: "https://passport.bilibili.com/login",
+  rednote: "https://creator.xiaohongshu.com/login"
+} as const;
+
+function openExternalLoginPage(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("open", ["-a", "Google Chrome", url], (error) => {
+      if (error) {
+        execFile("open", [url], (fallbackError) => {
+          if (fallbackError) reject(fallbackError);
+          else resolve();
+        });
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 const mediaFileSchema = z.object({
   name: z.string(),
@@ -51,19 +74,37 @@ app.get("/api/accounts", (_req, res) => {
 app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
   try {
     const { platformId } = z.object({ platformId: z.enum(["wechat", "zhihu", "bilibili", "rednote"]) }).parse(req.params);
+    const loginMessages = {
+      wechat: "已打开公众号登录页，请完成登录后返回 ContentFlow 发布。",
+      zhihu: "已打开知乎登录页，请完成登录后返回 ContentFlow 发布。",
+      bilibili: "已打开 B站登录页，请完成登录后返回 ContentFlow 发布。",
+      rednote: "已打开小红书登录页，请完成登录后返回 ContentFlow 发布。"
+    } as const;
+
     if (platformId === "wechat") {
-      const result = await wechatBrowserPublisher.openLoginPage();
-      res.json({ platformId, ...result, message: "已打开公众号登录页，请完成登录后返回 ContentFlow 发布。" });
+      try {
+        const result = await wechatBrowserPublisher.openLoginPage();
+        res.json({ platformId, ...result, message: loginMessages[platformId] });
+      } catch {
+        await openExternalLoginPage(platformLoginUrls[platformId]);
+        res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
+      }
       return;
     }
 
     if (platformId === "zhihu") {
-      const result = await zhihuBrowserPublisher.openLoginPage();
-      res.json({ platformId, ...result, message: "已打开知乎登录页，请完成登录后返回 ContentFlow 发布。" });
+      try {
+        const result = await zhihuBrowserPublisher.openLoginPage();
+        res.json({ platformId, ...result, message: loginMessages[platformId] });
+      } catch {
+        await openExternalLoginPage(platformLoginUrls[platformId]);
+        res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
+      }
       return;
     }
 
-    res.status(400).json({ error: "暂不支持该平台的自动登录" });
+    await openExternalLoginPage(platformLoginUrls[platformId]);
+    res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
   } catch (error) {
     next(error);
   }
