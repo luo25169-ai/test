@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createRednoteBrowserPublisher, rednoteLoginUrl, rednotePublishUrl } from "./rednote-browser.js";
 
-function createFakeLocator(visible = true) {
+function createFakeLocator(visible = true, onClick?: () => void) {
   return {
     fillCalls: [] as string[],
     clickCalls: 0,
@@ -11,6 +11,7 @@ function createFakeLocator(visible = true) {
     },
     click() {
       this.clickCalls += 1;
+      onClick?.();
       return Promise.resolve();
     },
     count() {
@@ -98,17 +99,25 @@ function createClosedOncePage() {
 }
 
 function createTextToImagePage() {
-  const body = createFakeLocator();
+  const state = { url: rednotePublishUrl, mode: "text-to-image" as "text-to-image" | "final" };
+  const promptBody = createFakeLocator();
+  const finalTitle = createFakeLocator();
+  const finalBody = createFakeLocator();
   const uploadTab = createFakeLocator();
   const textToImageButton = createFakeLocator();
+  const generateButton = createFakeLocator(true, () => {
+    state.mode = "final";
+  });
   const visibleText = createFakeLocator();
   const hidden = hiddenLocator();
-  const state = { url: rednotePublishUrl };
   const navigations: string[] = [];
   return {
-    body,
+    promptBody,
+    finalTitle,
+    finalBody,
     uploadTab,
     textToImageButton,
+    generateButton,
     navigations,
     goto(url: string) {
       navigations.push(url);
@@ -122,16 +131,20 @@ function createTextToImagePage() {
       return state.url;
     },
     locator(selector: string) {
-      if (selector.includes("contenteditable") || selector.includes("ProseMirror") || selector.includes("editor")) return body;
+      if (selector.includes("contenteditable") || selector.includes("ProseMirror") || selector.includes("editor")) {
+        return state.mode === "final" ? finalBody : promptBody;
+      }
       return hidden;
     },
-    getByPlaceholder() {
+    getByPlaceholder(text: string) {
+      if (state.mode === "final" && text.includes("标题")) return finalTitle;
       return hidden;
     },
     getByText(text: string) {
       if (text === "上传图文") return uploadTab;
       if (text === "文字配图") return textToImageButton;
-      if (text === "写文字" || text === "生成图片") return visibleText;
+      if (text === "生成图片") return generateButton;
+      if (text === "写文字") return visibleText;
       return hidden;
     },
     isClosed() {
@@ -151,7 +164,7 @@ describe("rednote browser publisher", () => {
     expect(page.navigations).toContain(rednoteLoginUrl);
   });
 
-  it("fills a Rednote note and stops before final publishing", async () => {
+  it("fills a Rednote note and clicks publish", async () => {
     const page = createFakePage({ loggedIn: true });
     const publisher = createRednoteBrowserPublisher({ openPage: async () => page });
 
@@ -165,7 +178,7 @@ describe("rednote browser publisher", () => {
     expect(page.navigations).toContain(rednotePublishUrl);
     expect(page.title.fillCalls).toContain("Rednote title");
     expect(page.body.fillCalls).toContain("Rednote body #AI");
-    expect(result.status).toBe("NEEDS_USER_ACTION");
+    expect(result.status).toBe("SUCCESS");
   });
 
   it("uses Rednote text-to-image mode when the note editor is gated behind image upload", async () => {
@@ -179,9 +192,10 @@ describe("rednote browser publisher", () => {
       images: []
     });
 
-    expect(page.body.fillCalls).toContain("Rednote title\n\nRednote body #AI");
-    expect(result.status).toBe("NEEDS_USER_ACTION");
-    expect(result.message).toContain("文字配图");
+    expect(page.promptBody.fillCalls).toContain("Rednote title\n\nRednote body #AI");
+    expect(page.finalTitle.fillCalls).toContain("Rednote title");
+    expect(page.finalBody.fillCalls).toContain("Rednote body #AI");
+    expect(result.status).toBe("SUCCESS");
   });
 
   it("keeps the current Rednote text-to-image page instead of resetting to the default video tab", async () => {
@@ -196,7 +210,7 @@ describe("rednote browser publisher", () => {
     });
 
     expect(page.navigations).not.toContain(rednotePublishUrl);
-    expect(page.body.fillCalls).toContain("Rednote title\n\nRednote body #AI");
+    expect(page.promptBody.fillCalls).toContain("Rednote title\n\nRednote body #AI");
   });
 
   it("checks login state without reopening the login page", async () => {
