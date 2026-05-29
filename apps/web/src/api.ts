@@ -55,7 +55,7 @@ export async function adaptContent(draft: DraftContent, platformIds: string[]) {
     body: JSON.stringify({ draft, platformIds })
   });
   if (!response.ok) throw new Error("内容适配失败");
-  return (await response.json()) as { items: AdaptationResult[] };
+  return (await response.json()) as { items: AdaptationResult[]; mode: "ai" | "rules"; aiError?: string };
 }
 
 export async function publishContent(draft: DraftContent, platformIds: string[]) {

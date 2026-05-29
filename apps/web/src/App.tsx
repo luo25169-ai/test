@@ -42,6 +42,8 @@ export default function App() {
   const [draft, setDraft] = useState<DraftContent>(initialDraft);
   const [selectedPlatforms, setSelectedPlatforms] = useState(platforms.map((platform) => platform.id));
   const [adapted, setAdapted] = useState<AdaptationResult[]>([]);
+  const [adaptMode, setAdaptMode] = useState<"ai" | "rules">("rules");
+  const [aiNotice, setAiNotice] = useState("");
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [activePreview, setActivePreview] = useState("wechat");
   const [loading, setLoading] = useState<"adapt" | "publish" | null>(null);
@@ -58,6 +60,8 @@ export default function App() {
     try {
       const response = await adaptContent(draft, selectedPlatforms);
       setAdapted(response.items);
+      setAdaptMode(response.mode);
+      setAiNotice(response.aiError ? "AI 调用失败，已降级为规则适配。请检查火山方舟模型是否已开通。" : "");
       setActivePreview(response.items[0]?.platformId ?? "wechat");
       setView("editor");
     } catch (err) {
@@ -134,6 +138,7 @@ export default function App() {
         </header>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        {aiNotice && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{aiNotice}</div>}
 
         {view === "dashboard" && (
           <section className="space-y-6">
@@ -236,6 +241,9 @@ export default function App() {
                     {loading === "adapt" ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
                     智能适配
                   </button>
+                  <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                    {adaptMode === "ai" ? "火山方舟 AI 改写" : "规则适配"}
+                  </span>
                   <button onClick={handlePublish} className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm text-white">
                     <Send size={16} />
                     发布

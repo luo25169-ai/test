@@ -1,7 +1,9 @@
 import cors from "cors";
+import "./env.js";
 import express from "express";
 import { z } from "zod";
-import { adaptForPlatforms, getPlatforms } from "./platforms/platform-registry.js";
+import { adaptForPlatforms, adaptForPlatformsWithAi, getPlatforms } from "./platforms/platform-registry.js";
+import { createConfiguredAiAdapter } from "./services/ai-adaptation-service.js";
 import { createPublishTask, getPublishTask, listPublishTasks } from "./services/publish-service.js";
 
 const mediaFileSchema = z.object({
@@ -41,9 +43,29 @@ app.get("/api/accounts", (_req, res) => {
   ]);
 });
 
-app.post("/api/adapt", (req, res) => {
-  const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
-  res.json({ items: adaptForPlatforms(body.draft, body.platformIds) });
+app.post("/api/adapt", async (req, res, next) => {
+  try {
+    const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
+    const aiAdapter = createConfiguredAiAdapter();
+    if (!aiAdapter) {
+      res.json({ items: adaptForPlatforms(body.draft, body.platformIds), mode: "rules" });
+      return;
+    }
+    try {
+      res.json({
+        items: await adaptForPlatformsWithAi(body.draft, body.platformIds, aiAdapter),
+        mode: "ai"
+      });
+    } catch (error) {
+      res.json({
+        items: adaptForPlatforms(body.draft, body.platformIds),
+        mode: "rules",
+        aiError: error instanceof Error ? error.message : "AI adaptation failed"
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/publish", async (req, res, next) => {
