@@ -187,6 +187,27 @@ export default function App() {
     }
   }
 
+  async function handleConfirmLogin(platformId: string, platformName: string) {
+    setError("");
+    setAccountNotice("");
+    setLoading(`login-check:${platformId}`);
+    try {
+      const result = await openPlatformLogin(platformId);
+      if (result.connected) {
+        setAccountNotice(`${platformName}：已确认登录态，可以发布。`);
+        setAccountStatuses((current) => ({ ...current, [platformId]: "CONNECTED" }));
+        setLoginOpenedPlatforms((current) => current.filter((id) => id !== platformId));
+      } else {
+        setAccountNotice(`${platformName}：还没有检测到登录态，请在已打开的登录页完成登录后再确认。`);
+        setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "登录态确认失败");
+    } finally {
+      setLoading(null);
+    }
+  }
+
   const pendingPreview = pendingPublishPlatform
     ? adapted.find((item) => item.platformId === pendingPublishPlatform)
     : undefined;
@@ -434,10 +455,11 @@ export default function App() {
                       </button>
                       {loginOpenedPlatforms.includes(platform.id) && (
                         <button
-                          onClick={() => setAccountStatuses((current) => ({ ...current, [platform.id]: "CONNECTED" }))}
-                          className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white"
+                          onClick={() => handleConfirmLogin(platform.id, platform.name)}
+                          disabled={loading === `login-check:${platform.id}`}
+                          className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
                         >
-                          <CheckCircle2 size={16} />
+                          {loading === `login-check:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
                           我已完成登录
                         </button>
                       )}

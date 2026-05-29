@@ -108,7 +108,11 @@ app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
     if (platformId === "bilibili") {
       try {
         const result = await bilibiliBrowserPublisher.openLoginPage();
-        res.json({ platformId, ...result, message: loginMessages[platformId] });
+        res.json({
+          platformId,
+          ...result,
+          message: result.connected ? "已检测到 B站登录态，可以返回 ContentFlow 发布。" : loginMessages[platformId]
+        });
       } catch {
         await openExternalLoginPage(platformLoginUrls[platformId]);
         res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });

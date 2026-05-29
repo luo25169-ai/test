@@ -34,7 +34,7 @@ function createFakePage(options?: { loggedIn?: boolean }) {
   const login = createFakeLocator();
   const hidden = createHiddenLocator();
   const state = {
-    url: bilibiliLoginUrl
+    url: options?.loggedIn ? "https://www.bilibili.com/" : bilibiliLoginUrl
   };
   const navigations: string[] = [];
   return {
@@ -104,6 +104,26 @@ describe("bilibili browser publisher", () => {
     expect(page.editor.fillCalls).toContain("Bilibili body #AI");
     expect(result.status).toBe("NEEDS_USER_ACTION");
     expect(result.message).toContain("动态内容已填入");
+  });
+
+  it("prefers an existing authenticated Bilibili page from the user browser", async () => {
+    const managedPage = createFakePage();
+    const userPage = createFakePage({ loggedIn: true });
+    const publisher = createBilibiliBrowserPublisher({
+      openPage: async () => managedPage,
+      openUserPage: async () => userPage
+    });
+
+    const result = await publisher.publish({
+      body: "Bilibili body #AI",
+      tags: ["AI"],
+      images: []
+    });
+
+    expect(userPage.navigations).toContain(bilibiliDynamicUrl);
+    expect(userPage.editor.fillCalls).toContain("Bilibili body #AI");
+    expect(managedPage.navigations).toHaveLength(0);
+    expect(result.status).toBe("NEEDS_USER_ACTION");
   });
 
   it("asks the user to log in before publishing when Bilibili is not authenticated", async () => {

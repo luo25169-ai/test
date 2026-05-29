@@ -28,6 +28,7 @@ interface BilibiliBrowserPage extends BrowserPage {
 
 export interface BilibiliBrowserPublisherOptions {
   openPage?: () => Promise<BilibiliBrowserPage>;
+  openUserPage?: () => Promise<BilibiliBrowserPage | null>;
   executablePath?: string;
   headless?: boolean;
 }
@@ -194,6 +195,22 @@ async function ensurePersistentPage(options: BilibiliBrowserPublisherOptions): P
   return ensureManagedPage(browser);
 }
 
+async function findUserBilibiliPage(): Promise<BilibiliBrowserPage | null> {
+  const { chromium } = await import("playwright-core");
+  const port = Number(process.env.CONTENTFLOW_BROWSER_PORT ?? 9222);
+  try {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    const pages = browser.contexts().flatMap((context: any) => context.pages());
+    const bilibiliPages = pages.filter((page: any) => {
+      const url = typeof page.url === "function" ? page.url() : "";
+      return url.includes("bilibili.com") && !url.includes("passport.bilibili.com");
+    });
+    return bilibiliPages[0] ? wrapPage(bilibiliPages[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function gotoAndIgnoreAbort(page: BrowserPage, url: string): Promise<void> {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -337,11 +354,28 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
     return persistentPage;
   }
 
+  async function getAuthenticatedUserPage(): Promise<BilibiliBrowserPage | null> {
+    const page = options.openUserPage ? await options.openUserPage() : await findUserBilibiliPage();
+    if (!page) return null;
+    const wrappedPage = wrapPage(page);
+    if (await isBilibiliLoginRequired(wrappedPage)) return null;
+    return wrappedPage;
+  }
+
   return {
     async openLoginPage() {
       const page = await getPage();
-      await gotoAndIgnoreAbort(page, bilibiliLoginUrl);
+      await gotoAndIgnoreAbort(page, bilibiliDynamicUrl);
       await page.waitForLoadState("domcontentloaded");
+      await waitForAnyVisible(page, [
+        () => findFirstVisibleLocator(page, [".go-login-btn", ".bili-dyn-login-register__login-btn"]),
+        () => findFirstVisiblePlaceholder(page, ["说点什么", "发一条友善的动态", "分享你的动态"]),
+        () => findFirstVisibleLocator(page, ["div[contenteditable='true']", "[contenteditable='true']", ".ql-editor", ".ProseMirror"])
+      ]);
+      if (await isBilibiliLoginRequired(page)) {
+        await gotoAndIgnoreAbort(page, bilibiliLoginUrl);
+        await page.waitForLoadState("domcontentloaded");
+      }
       await page.bringToFront?.();
       activateChromeWindow();
       return { url: page.url(), connected: !(await isBilibiliLoginRequired(page)) };
@@ -350,7 +384,7 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
     async publish(draft: BilibiliPublishDraft) {
       let page: BilibiliBrowserPage;
       try {
-        page = await getPage();
+        page = (await getAuthenticatedUserPage()) ?? (await getPage());
         await gotoAndIgnoreAbort(page, bilibiliDynamicUrl);
         await page.waitForLoadState("domcontentloaded");
         await waitForAnyVisible(page, [
