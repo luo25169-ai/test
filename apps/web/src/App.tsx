@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { AdaptationResult, DraftContent, PublishTask } from "./api";
-import { adaptContent, openPlatformLogin, publishContent } from "./api";
+import { adaptContent, checkPlatformLogin, openPlatformLogin, publishContent } from "./api";
 
 type View = "dashboard" | "editor" | "accounts" | "tasks" | "history";
 type AccountStatus = "CONNECTED" | "NEEDS_LOGIN";
@@ -192,7 +192,7 @@ export default function App() {
     setAccountNotice("");
     setLoading(`login-check:${platformId}`);
     try {
-      const result = await openPlatformLogin(platformId);
+      const result = await checkPlatformLogin(platformId);
       if (result.connected) {
         setAccountNotice(`${platformName}：已确认登录态，可以发布。`);
         setAccountStatuses((current) => ({ ...current, [platformId]: "CONNECTED" }));

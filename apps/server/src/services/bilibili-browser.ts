@@ -15,6 +15,7 @@ export interface BilibiliPublishDraft {
 
 export interface BilibiliBrowserPublisher {
   openLoginPage(): Promise<{ url: string; connected?: boolean }>;
+  checkLoginStatus(): Promise<{ connected: boolean; url?: string }>;
   publish(draft: BilibiliPublishDraft): Promise<{
     status: "SUCCESS" | "NEEDS_LOGIN" | "NEEDS_USER_ACTION";
     message: string;
@@ -379,6 +380,18 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
       await page.bringToFront?.();
       activateChromeWindow();
       return { url: page.url(), connected: !(await isBilibiliLoginRequired(page)) };
+    },
+
+    async checkLoginStatus() {
+      const page = (await getAuthenticatedUserPage()) ?? (await getPage());
+      await gotoAndIgnoreAbort(page, bilibiliDynamicUrl);
+      await page.waitForLoadState("domcontentloaded");
+      await waitForAnyVisible(page, [
+        () => findFirstVisibleLocator(page, [".go-login-btn", ".bili-dyn-login-register__login-btn"]),
+        () => findFirstVisiblePlaceholder(page, ["说点什么", "发一条友善的动态", "分享你的动态"]),
+        () => findFirstVisibleLocator(page, ["div[contenteditable='true']", "[contenteditable='true']", ".ql-editor", ".ProseMirror"])
+      ]);
+      return { connected: !(await isBilibiliLoginRequired(page)), url: page.url() };
     },
 
     async publish(draft: BilibiliPublishDraft) {

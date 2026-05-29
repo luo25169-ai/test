@@ -85,6 +85,9 @@ describe("publish service", () => {
           async openLoginPage() {
             return { url: "https://passport.bilibili.com/login" };
           },
+          async checkLoginStatus() {
+            return { connected: true };
+          },
           async publish() {
             return {
               status: "NEEDS_USER_ACTION",
@@ -99,5 +102,40 @@ describe("publish service", () => {
     expect(task.status).toBe("PARTIAL");
     expect(task.results[0]?.status).toBe("NEEDS_USER_ACTION");
     expect(task.results[0]?.message).toContain("动态内容已填入");
+  });
+
+  it("routes Rednote publishing through the browser note filler", async () => {
+    const task = await createPublishTask(
+      {
+        draft: {
+          title: "AI 工具提升内容创作效率",
+          content: "今天测试一款 AI 内容工具。",
+          tags: ["AI", "效率"],
+          images: [{ name: "cover.png", url: "https://example.com/cover.png", type: "image/png" }]
+        },
+        platformIds: ["rednote"]
+      },
+      {
+        rednotePublisher: {
+          async openLoginPage() {
+            return { url: "https://creator.xiaohongshu.com/login" };
+          },
+          async checkLoginStatus() {
+            return { connected: true };
+          },
+          async publish() {
+            return {
+              status: "NEEDS_USER_ACTION",
+              message: "小红书笔记内容已填入，请上传图片并确认后手动发布"
+            };
+          }
+        }
+      }
+    );
+
+    expect(task.results[0]?.platformId).toBe("rednote");
+    expect(task.status).toBe("PARTIAL");
+    expect(task.results[0]?.status).toBe("NEEDS_USER_ACTION");
+    expect(task.results[0]?.message).toContain("笔记内容已填入");
   });
 });

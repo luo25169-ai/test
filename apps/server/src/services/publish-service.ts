@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { adaptForPlatforms, platformRegistry } from "../platforms/platform-registry.js";
 import type { AdaptationResult, DraftContent, PublishResult } from "../platforms/types.js";
 import type { BilibiliBrowserPublisher } from "./bilibili-browser.js";
+import type { RednoteBrowserPublisher } from "./rednote-browser.js";
 import type { WechatBrowserPublisher } from "./wechat-browser.js";
 import type { ZhihuBrowserPublisher } from "./zhihu-browser.js";
 
@@ -28,6 +29,7 @@ export interface CreatePublishTaskInput {
 
 export interface CreatePublishTaskOptions {
   bilibiliPublisher?: BilibiliBrowserPublisher;
+  rednotePublisher?: RednoteBrowserPublisher;
   wechatPublisher?: WechatBrowserPublisher;
   zhihuPublisher?: ZhihuBrowserPublisher;
 }
@@ -94,6 +96,17 @@ export async function createPublishTask(
             platformId: item.platformId,
             platform: item.platform,
             ...(await options.zhihuPublisher.publish({
+              title: item.content.title,
+              body: item.content.body,
+              tags: item.content.tags,
+              images: item.content.images
+            }))
+          }
+        : item.platformId === "rednote" && options.rednotePublisher
+        ? {
+            platformId: item.platformId,
+            platform: item.platform,
+            ...(await options.rednotePublisher.publish({
               title: item.content.title,
               body: item.content.body,
               tags: item.content.tags,

@@ -79,3 +79,15 @@ export async function openPlatformLogin(platformId: string) {
   }
   return (await response.json()) as { platformId: string; url: string; message: string; connected?: boolean };
 }
+
+export async function checkPlatformLogin(platformId: string) {
+  const response = await fetch(`/api/accounts/${platformId}/check-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!response.ok) {
+    const details = await response.json().catch(() => null);
+    throw new Error(details?.error ?? "确认登录态失败");
+  }
+  return (await response.json()) as { platformId: string; connected: boolean; message: string };
+}

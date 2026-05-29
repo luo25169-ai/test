@@ -7,10 +7,12 @@ import { adaptForPlatforms, adaptForPlatformsWithAi, getPlatforms } from "./plat
 import { createConfiguredAiAdapter } from "./services/ai-adaptation-service.js";
 import { createBilibiliBrowserPublisher } from "./services/bilibili-browser.js";
 import { createPublishTask, getPublishTask, listPublishTasks } from "./services/publish-service.js";
+import { createRednoteBrowserPublisher } from "./services/rednote-browser.js";
 import { createWechatBrowserPublisher } from "./services/wechat-browser.js";
 import { createZhihuBrowserPublisher } from "./services/zhihu-browser.js";
 
 const bilibiliBrowserPublisher = createBilibiliBrowserPublisher();
+const rednoteBrowserPublisher = createRednoteBrowserPublisher();
 const wechatBrowserPublisher = createWechatBrowserPublisher();
 const zhihuBrowserPublisher = createZhihuBrowserPublisher();
 
@@ -120,8 +122,42 @@ app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
       return;
     }
 
+    if (platformId === "rednote") {
+      try {
+        const result = await rednoteBrowserPublisher.openLoginPage();
+        res.json({
+          platformId,
+          ...result,
+          message: result.connected ? "已检测到小红书登录态，可以返回 ContentFlow 发布。" : loginMessages[platformId]
+        });
+      } catch {
+        await openExternalLoginPage(platformLoginUrls[platformId]);
+        res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
+      }
+      return;
+    }
+
     await openExternalLoginPage(platformLoginUrls[platformId]);
     res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/accounts/:platformId/check-login", async (req, res, next) => {
+  try {
+    const { platformId } = z.object({ platformId: z.enum(["wechat", "zhihu", "bilibili", "rednote"]) }).parse(req.params);
+    if (platformId === "bilibili") {
+      const result = await bilibiliBrowserPublisher.checkLoginStatus();
+      res.json({ platformId, ...result, message: result.connected ? "已检测到 B站登录态" : "还没有检测到 B站登录态" });
+      return;
+    }
+    if (platformId === "rednote") {
+      const result = await rednoteBrowserPublisher.checkLoginStatus();
+      res.json({ platformId, ...result, message: result.connected ? "已检测到小红书登录态" : "还没有检测到小红书登录态" });
+      return;
+    }
+    res.json({ platformId, connected: false, message: "该平台暂未接入登录态检测" });
   } catch (error) {
     next(error);
   }
@@ -162,6 +198,7 @@ app.post("/api/publish", async (req, res, next) => {
     res.status(201).json(
       await createPublishTask(body, {
         bilibiliPublisher: bilibiliBrowserPublisher,
+        rednotePublisher: rednoteBrowserPublisher,
         wechatPublisher: wechatBrowserPublisher,
         zhihuPublisher: zhihuBrowserPublisher
       })
