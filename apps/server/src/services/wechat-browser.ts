@@ -270,9 +270,20 @@ async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<bo
 }
 
 export function createWechatBrowserPublisher(options: WechatBrowserPublisherOptions = {}): WechatBrowserPublisher {
+  function resetPersistentPage(): void {
+    persistentPage = null;
+    persistentPagePromise = null;
+  }
+
   async function getPage(): Promise<WechatBrowserPage> {
     if (options.openPage) return wrapPage(await options.openPage());
-    if (persistentPage && !persistentPage.isClosed()) return persistentPage;
+    if (persistentPage) {
+      try {
+        if (!persistentPage.isClosed()) return persistentPage;
+      } catch {
+        resetPersistentPage();
+      }
+    }
     if (!persistentPagePromise) {
       persistentPagePromise = ensurePersistentPage(options);
     }
@@ -282,20 +293,35 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
 
   return {
     async openLoginPage() {
-      const page = await getPage();
-      await gotoAndIgnoreAbort(page, wechatLoginUrl);
-      await page.waitForLoadState("domcontentloaded");
-      await page.bringToFront?.();
-      activateChromeWindow();
-      return { url: wechatLoginUrl };
+      try {
+        const page = await getPage();
+        await gotoAndIgnoreAbort(page, wechatLoginUrl);
+        await page.waitForLoadState("domcontentloaded");
+        await page.bringToFront?.();
+        activateChromeWindow();
+        return { url: wechatLoginUrl };
+      } catch (error) {
+        resetPersistentPage();
+        throw error;
+      }
     },
 
     async publish(draft: WechatPublishDraft) {
-      const page = await getPage();
-      await gotoAndIgnoreAbort(page, wechatArticleEditUrl);
-      await page.waitForLoadState("domcontentloaded");
-      await page.bringToFront?.();
-      activateChromeWindow();
+      let page: WechatBrowserPage;
+      try {
+        page = await getPage();
+        await gotoAndIgnoreAbort(page, wechatArticleEditUrl);
+        await page.waitForLoadState("domcontentloaded");
+        await page.bringToFront?.();
+        activateChromeWindow();
+      } catch (error) {
+        resetPersistentPage();
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          status: "NEEDS_LOGIN",
+          message: message.includes("closed") ? "公众号登录窗口已关闭，请重新打开平台登录页" : "公众号页面打开失败，请重新登录后再发布"
+        };
+      }
 
       if (await isWechatLoginRequired(page)) {
         return {

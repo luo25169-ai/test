@@ -71,7 +71,11 @@ app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
 
 app.post("/api/adapt", async (req, res, next) => {
   try {
-    const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
+    const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema, mode: z.enum(["ai", "rules"]).optional() }).parse(req.body);
+    if (body.mode === "rules") {
+      res.json({ items: adaptForPlatforms(body.draft, body.platformIds), mode: "rules" });
+      return;
+    }
     const aiAdapter = createConfiguredAiAdapter();
     if (!aiAdapter) {
       res.json({ items: adaptForPlatforms(body.draft, body.platformIds), mode: "rules" });

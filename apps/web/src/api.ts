@@ -48,11 +48,11 @@ export interface PublishTask {
   createdAt: string;
 }
 
-export async function adaptContent(draft: DraftContent, platformIds: string[]) {
+export async function adaptContent(draft: DraftContent, platformIds: string[], mode: "ai" | "rules" = "ai") {
   const response = await fetch("/api/adapt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ draft, platformIds })
+    body: JSON.stringify({ draft, platformIds, mode })
   });
   if (!response.ok) throw new Error("内容适配失败");
   return (await response.json()) as { items: AdaptationResult[]; mode: "ai" | "rules"; aiError?: string };
