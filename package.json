@@ -1,0 +1,15 @@
+{
+  "name": "contentflow",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ContentFlow multi-platform content publishing assistant.",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @contentflow/server --filter @contentflow/web dev",
+    "build": "pnpm --filter @contentflow/server build && pnpm --filter @contentflow/web build",
+    "test": "pnpm --filter @contentflow/server test -- --run"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

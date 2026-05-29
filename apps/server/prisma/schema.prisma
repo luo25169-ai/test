@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model PlatformAccount {
+  id           String   @id @default(cuid())
+  platformId   String
+  platformName String
+  nickname     String
+  status       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Draft {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  tags      String
+  images    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PublishTask {
+  id        String   @id @default(cuid())
+  status    String
+  draft     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  results   PublishResult[]
+  logs      PublishLog[]
+}
+
+model PublishResult {
+  id          String      @id @default(cuid())
+  taskId      String
+  platformId  String
+  platform    String
+  status      String
+  message     String
+  publishedUrl String?
+  task        PublishTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model PublishLog {
+  id        String      @id @default(cuid())
+  taskId    String
+  level     String
+  message   String
+  createdAt DateTime    @default(now())
+  task      PublishTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
