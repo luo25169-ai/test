@@ -66,6 +66,7 @@ function createFakePage(options?: { loggedIn?: boolean }) {
       return hidden;
     },
     getByText(text: string) {
+      if (options?.loggedIn && text === "上传图文") return createFakeLocator();
       if (!options?.loggedIn && (text === "登录" || text === "扫码登录")) return login;
       return hidden;
     },
@@ -96,6 +97,49 @@ function createClosedOncePage() {
   };
 }
 
+function createTextToImagePage() {
+  const body = createFakeLocator();
+  const uploadTab = createFakeLocator();
+  const textToImageButton = createFakeLocator();
+  const visibleText = createFakeLocator();
+  const hidden = hiddenLocator();
+  const state = { url: "https://creator.xiaohongshu.com/" };
+  const navigations: string[] = [];
+  return {
+    body,
+    uploadTab,
+    textToImageButton,
+    navigations,
+    goto(url: string) {
+      navigations.push(url);
+      state.url = url;
+      return Promise.resolve();
+    },
+    waitForLoadState() {
+      return Promise.resolve();
+    },
+    url() {
+      return state.url;
+    },
+    locator(selector: string) {
+      if (selector.includes("contenteditable") || selector.includes("ProseMirror") || selector.includes("editor")) return body;
+      return hidden;
+    },
+    getByPlaceholder() {
+      return hidden;
+    },
+    getByText(text: string) {
+      if (text === "上传图文") return uploadTab;
+      if (text === "文字配图") return textToImageButton;
+      if (text === "写文字" || text === "生成图片") return visibleText;
+      return hidden;
+    },
+    isClosed() {
+      return false;
+    }
+  };
+}
+
 describe("rednote browser publisher", () => {
   it("opens the Rednote login page", async () => {
     const page = createFakePage();
@@ -122,6 +166,24 @@ describe("rednote browser publisher", () => {
     expect(page.title.fillCalls).toContain("Rednote title");
     expect(page.body.fillCalls).toContain("Rednote body #AI");
     expect(result.status).toBe("NEEDS_USER_ACTION");
+  });
+
+  it("uses Rednote text-to-image mode when the note editor is gated behind image upload", async () => {
+    const page = createTextToImagePage();
+    const publisher = createRednoteBrowserPublisher({ openPage: async () => page });
+
+    const result = await publisher.publish({
+      title: "Rednote title",
+      body: "Rednote body #AI",
+      tags: ["AI"],
+      images: []
+    });
+
+    expect(page.uploadTab.clickCalls).toBeGreaterThan(0);
+    expect(page.textToImageButton.clickCalls).toBeGreaterThan(0);
+    expect(page.body.fillCalls).toContain("Rednote title\n\nRednote body #AI");
+    expect(result.status).toBe("NEEDS_USER_ACTION");
+    expect(result.message).toContain("文字配图");
   });
 
   it("checks login state without reopening the login page", async () => {

@@ -32,7 +32,19 @@ describe("platform adapters", () => {
     const [rednote] = adaptForPlatforms(draft, ["rednote"]);
 
     expect(rednote.validation.valid).toBe(false);
-    expect(rednote.validation.issues).toContain("小红书图文至少需要 1 张图片");
     expect(rednote.validation.issues.some((issue) => issue.includes("标题不能超过"))).toBe(true);
+  });
+
+  it("allows Rednote text-only drafts because the browser flow can use text-to-image", () => {
+    const draft = {
+      title: "AI 内容效率",
+      content: "今天测试一款 AI 内容工具。",
+      tags: ["AI"],
+      images: []
+    };
+
+    const [rednote] = adaptForPlatforms(draft, ["rednote"]);
+
+    expect(rednote.validation.valid).toBe(true);
   });
 });

@@ -23,8 +23,8 @@ describe("publish service", () => {
   it("marks invalid platform content as failed and preserves logs", async () => {
     const task = await createPublishTask({
       draft: {
-        title: "没有图片的小红书内容",
-        content: "这条内容缺少图片。",
+        title: "这个小红书标题已经明显超过二十个字限制很多",
+        content: "这条内容标题过长。",
         tags: ["AI"],
         images: []
       },
@@ -33,7 +33,7 @@ describe("publish service", () => {
 
     expect(task.status).toBe("FAILED");
     expect(task.results[0]?.status).toBe("FAILED");
-    expect(task.logs.some((log) => log.message.includes("小红书图文至少需要 1 张图片"))).toBe(true);
+    expect(task.logs.some((log) => log.message.includes("标题不能超过"))).toBe(true);
   });
 
   it("routes WeChat publishing through the browser draft filler", async () => {

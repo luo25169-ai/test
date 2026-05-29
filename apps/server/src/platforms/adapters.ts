@@ -117,7 +117,7 @@ export const rednoteAdapter: PlatformAdapter = {
   id: "rednote",
   name: "小红书",
   type: "dynamic",
-  limits: { titleMax: 20, bodyMax: 1000, minImages: 1, maxTags: 10 },
+  limits: { titleMax: 20, bodyMax: 1000, maxTags: 10 },
   formatContent(input: DraftContent) {
     return {
       title: input.title,

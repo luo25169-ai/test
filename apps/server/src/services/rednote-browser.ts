@@ -15,6 +15,9 @@ export interface RednotePublishDraft {
 
 interface RednoteBrowserPage extends BrowserPage {
   evaluate?<T>(pageFunction: (arg: string) => T, arg: string): Promise<T>;
+  mouse?: {
+    click(x: number, y: number): Promise<void>;
+  };
 }
 
 export interface RednoteBrowserPublisher {
@@ -98,6 +101,14 @@ function wrapPage(page: any): RednoteBrowserPage {
             },
             async press(key: string) {
               await page.keyboard.press(key);
+            }
+          }
+        : undefined,
+    mouse:
+      page.mouse && typeof page.mouse.click === "function"
+        ? {
+            async click(x: number, y: number) {
+              await page.mouse.click(x, y);
             }
           }
         : undefined,
@@ -217,6 +228,60 @@ async function findFirstVisibleText(page: BrowserPage, texts: string[]): Promise
   return null;
 }
 
+async function clickFirstVisibleText(page: RednoteBrowserPage, texts: string[]): Promise<boolean> {
+  if (page.evaluate) {
+    const clickTarget = await page.evaluate((rawTexts) => {
+      const expectedTexts = JSON.parse(rawTexts) as string[];
+      const doc = (globalThis as any).document;
+      const win = globalThis as any;
+      const isVisible = (element: any) => {
+        const rect = element.getBoundingClientRect();
+        const style = win.getComputedStyle(element);
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.right > 0 &&
+          rect.bottom > 0 &&
+          rect.left < win.innerWidth &&
+          rect.top < win.innerHeight &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0.01
+        );
+      };
+      const nodes = Array.from(doc.querySelectorAll("*")) as any[];
+      for (const text of expectedTexts) {
+        const node = nodes.find((element) => {
+          if ((element.innerText || element.textContent || "").trim() !== text) return false;
+          const target = element.closest?.(".creator-tab, button, [role='button']") ?? element;
+          return isVisible(target);
+        });
+        const target = node?.closest?.(".creator-tab, button, [role='button']") ?? node;
+        if (target && isVisible(target)) {
+          const rect = target.getBoundingClientRect();
+          const hitTarget = doc.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) ?? target;
+          for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+            hitTarget.dispatchEvent(new win.MouseEvent(eventName, { bubbles: true, cancelable: true, view: win }));
+          }
+          target.click();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }
+      }
+      return null;
+    }, JSON.stringify(texts));
+    if (clickTarget) {
+      if (page.mouse) {
+        await page.mouse.click(clickTarget.x, clickTarget.y);
+      }
+      return true;
+    }
+  }
+  const locator = await findFirstVisibleText(page, texts);
+  if (!locator) return false;
+  await locator.click();
+  return true;
+}
+
 async function waitForAnyVisible(page: BrowserPage, checks: Array<() => Promise<BrowserLocator | null>>, timeoutMs = 8000): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -247,23 +312,33 @@ async function fillText(page: RednoteBrowserPage, locator: BrowserLocator, value
   await locator.fill(value);
 }
 
-async function fillRednoteForm(page: RednoteBrowserPage, title: string, body: string): Promise<boolean> {
+async function fillRednoteForm(
+  page: RednoteBrowserPage,
+  title: string,
+  body: string
+): Promise<"NOTE_EDITOR" | "TEXT_TO_IMAGE" | null> {
   const titleLocator =
     (await findFirstVisiblePlaceholder(page, ["填写标题", "请输入标题", "标题"])) ??
     (await findFirstVisibleLocator(page, ["input[placeholder*='标题']", "textarea[placeholder*='标题']", "[class*='title'] input"]));
   const bodyLocator =
     (await findFirstVisiblePlaceholder(page, ["填写正文", "输入正文", "添加正文", "描述", "分享"])) ??
     (await findFirstVisibleLocator(page, ["textarea[placeholder*='正文']", "textarea[placeholder*='描述']", "[contenteditable='true']", "[class*='editor']"]));
-  if (!titleLocator || !bodyLocator) return false;
+  if (!bodyLocator) return null;
+  if (!titleLocator && (await findFirstVisibleText(page, ["写文字", "生成图片", "再写一张"])) !== null) {
+    await fillText(page, bodyLocator, `${title}\n\n${body}`);
+    return "TEXT_TO_IMAGE";
+  }
+  if (!titleLocator) return null;
   await fillText(page, titleLocator, title);
   await fillText(page, bodyLocator, body);
-  return true;
+  return "NOTE_EDITOR";
 }
 
 export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOptions = {}): RednoteBrowserPublisher {
   function resetPersistentPage(): void {
     persistentPage = null;
     persistentPagePromise = null;
+    managedBrowserPromise = null;
   }
 
   async function getPage(): Promise<RednoteBrowserPage> {
@@ -309,20 +384,39 @@ export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOp
     },
 
     async publish(draft: RednotePublishDraft) {
-      let page: RednoteBrowserPage;
-      try {
-        page = await getPage();
-        await gotoAndIgnoreAbort(page, rednotePublishUrl);
-        await page.waitForLoadState("domcontentloaded");
-        await waitForAnyVisible(page, [
-          () => findFirstVisiblePlaceholder(page, ["填写标题", "请输入标题", "标题"]),
-          () => findFirstVisibleLocator(page, ["[class*='login']", ".login-container", ".login-panel"])
-        ]);
-        await page.bringToFront?.();
-        activateChromeWindow();
-      } catch (error) {
-        resetPersistentPage();
-        const message = error instanceof Error ? error.message : String(error);
+      let page: RednoteBrowserPage | null = null;
+      let openError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const currentPage = await getPage();
+          page = currentPage;
+          await gotoAndIgnoreAbort(currentPage, rednotePublishUrl);
+          await currentPage.waitForLoadState("domcontentloaded");
+          await waitForAnyVisible(currentPage, [() => findFirstVisibleText(currentPage, ["上传图文"])], 10000);
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          await clickFirstVisibleText(currentPage, ["上传图文"]);
+          await waitForAnyVisible(currentPage, [
+            () => findFirstVisiblePlaceholder(currentPage, ["填写标题", "请输入标题", "标题"]),
+            () => findFirstVisibleText(currentPage, ["上传图片", "文字配图", "生成图片"]),
+            () => findFirstVisibleLocator(currentPage, ["[contenteditable='true']", "[class*='login']", ".login-container", ".login-panel"])
+          ]);
+          if ((await findFirstVisibleText(currentPage, ["上传图片", "文字配图"])) !== null) {
+            await clickFirstVisibleText(currentPage, ["文字配图"]);
+            await waitForAnyVisible(currentPage, [
+              () => findFirstVisibleLocator(currentPage, ["[contenteditable='true']", ".ProseMirror"]),
+              () => findFirstVisiblePlaceholder(currentPage, ["填写标题", "请输入标题", "标题"])
+            ]);
+          }
+          await currentPage.bringToFront?.();
+          activateChromeWindow();
+          break;
+        } catch (error) {
+          openError = error;
+          resetPersistentPage();
+        }
+      }
+      if (!page) {
+        const message = openError instanceof Error ? openError.message : String(openError);
         return {
           status: "NEEDS_LOGIN",
           message: message.includes("closed") ? "小红书登录窗口已关闭，请重新打开平台登录页" : "小红书页面打开失败，请重新登录后再发布"
@@ -335,10 +429,18 @@ export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOp
           message: "请先在已打开的小红书登录页完成登录，再重新点击发布"
         };
       }
-      if (!(await fillRednoteForm(page, draft.title, draft.body))) {
+      const filledMode = await fillRednoteForm(page, draft.title, draft.body);
+      if (!filledMode) {
         return {
           status: "NEEDS_USER_ACTION",
-          message: "没有找到小红书笔记编辑区"
+          message: "已打开小红书图文发布页，请先上传图片或选择文字配图后再发布"
+        };
+      }
+      if (filledMode === "TEXT_TO_IMAGE") {
+        return {
+          status: "NEEDS_USER_ACTION",
+          message: "小红书文字配图内容已填入，请点击生成图片后继续完成发布",
+          publishedUrl: page.url()
         };
       }
       return {

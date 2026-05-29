@@ -40,6 +40,12 @@ function classNames(...items: Array<string | false | undefined>) {
   return items.filter(Boolean).join(" ");
 }
 
+function resultStatusClass(status: string) {
+  if (status === "SUCCESS") return "text-emerald-700";
+  if (status === "NEEDS_USER_ACTION") return "text-amber-700";
+  return "text-red-700";
+}
+
 const accountStatusesStorageKey = "contentflow.accountStatuses";
 const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
 
@@ -492,7 +498,7 @@ export default function App() {
                   {task.results.map((result) => (
                     <div key={result.platformId} className="rounded-md bg-slate-50 p-3 text-sm">
                       <div className="mb-1 font-medium">{result.platform}</div>
-                      <div className={result.status === "SUCCESS" ? "text-emerald-700" : "text-red-700"}>{result.status}</div>
+                      <div className={resultStatusClass(result.status)}>{result.status}</div>
                       <p className="mt-2 text-xs text-muted">{result.message}</p>
                     </div>
                   ))}

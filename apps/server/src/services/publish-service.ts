@@ -118,7 +118,7 @@ export async function createPublishTask(
             adaptedContent: item.content,
             mode: "browser"
           });
-    log(logs, result.status === "SUCCESS" ? "info" : "error", result.message);
+    log(logs, result.status === "FAILED" || result.status === "NEEDS_LOGIN" ? "error" : "info", result.message);
     results.push(result);
   }
 
