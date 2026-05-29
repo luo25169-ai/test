@@ -27,6 +27,7 @@ export interface BrowserPage {
   locator(selector: string): BrowserLocator;
   getByPlaceholder(text: string, options?: { exact?: boolean }): BrowserLocator;
   getByText(text: string, options?: { exact?: boolean }): BrowserLocator;
+  evaluate?<T>(pageFunction: (arg: any) => T, arg: any): Promise<T>;
   isClosed(): boolean;
   bringToFront?(): Promise<void>;
 }
@@ -125,6 +126,12 @@ function wrapPage(page: any): BrowserPage {
     getByText(text: string, options?: { exact?: boolean }) {
       return wrapLocator(page.getByText(text, options));
     },
+    evaluate<T>(pageFunction: (arg: any) => T, arg: any) {
+      if (typeof page.evaluate !== "function") {
+        return Promise.reject(new Error("page.evaluate is not available"));
+      }
+      return page.evaluate(pageFunction, arg);
+    },
     isClosed() {
       return typeof page.isClosed === "function" ? page.isClosed() : false;
     },
@@ -191,6 +198,177 @@ async function clickButton(page: BrowserPage, labels: string[]): Promise<boolean
   if (!locator) return false;
   await locator.click();
   return true;
+}
+
+async function fillEditorFieldByEvaluation(page: BrowserPage, kind: "title" | "body", value: string): Promise<boolean> {
+  if (typeof page.evaluate !== "function") return false;
+  return page.evaluate(
+    ({ kind, value }) => {
+      const g = globalThis as any;
+      const d = g.document as any;
+      const w = g.window ?? g;
+      const isVisible = (element: any) => {
+        const style = w.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      };
+
+      const wantedText = kind === "title" ? ["请输入标题", "标题"] : ["请输入正文", "正文", "内容"];
+      const selectors =
+        kind === "title"
+          ? [
+              'h1[contenteditable="true"]',
+              'div[contenteditable="true"][data-placeholder*="标题"]',
+              'div[contenteditable="true"][placeholder*="标题"]',
+              'div[contenteditable="true"][aria-label*="标题"]',
+              'div[contenteditable="true"][role="textbox"]',
+              'textarea[placeholder*="标题"]',
+              'input[placeholder*="标题"]',
+              '.WriteIndex-titleInput textarea',
+              '.WriteIndex-titleInput input'
+            ]
+          : [
+              ".public-DraftEditor-content",
+              '[data-slate-editor="true"]',
+              "[data-slate-editor]",
+              'div[contenteditable="true"]',
+              'textarea[placeholder*="正文"]',
+              'textarea[placeholder*="内容"]',
+              "textarea"
+            ];
+
+      const candidates: any[] = [];
+      const pushCandidate = (element: any | null) => {
+        if (!element || !isVisible(element)) return;
+        if (!candidates.includes(element)) candidates.push(element);
+      };
+
+      for (const selector of selectors) {
+        d.querySelectorAll(selector).forEach(pushCandidate);
+      }
+
+      if (!candidates.length) {
+        d.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"], h1, h2, h3, div, p').forEach((element: any) => {
+          if (!isVisible(element)) return;
+          const haystack = [
+            element.getAttribute("placeholder"),
+            element.getAttribute("aria-label"),
+            element.getAttribute("data-placeholder"),
+            element.getAttribute("title"),
+            element.textContent,
+            element.innerText
+          ]
+            .filter(Boolean)
+            .join(" ");
+          if (wantedText.some((text) => haystack.includes(text))) {
+            pushCandidate(element);
+          }
+        });
+      }
+
+      if (!candidates.length) return false;
+
+      const score = (element: any) => {
+        const rect = element.getBoundingClientRect();
+        const haystack = [
+          element.getAttribute("placeholder"),
+          element.getAttribute("aria-label"),
+          element.getAttribute("data-placeholder"),
+          element.getAttribute("title"),
+          element.textContent,
+          element.innerText
+        ]
+          .filter(Boolean)
+          .join(" ");
+        let valueScore = 0;
+        if (kind === "title") {
+          if (haystack.includes("标题")) valueScore += 100;
+          if (element.tagName === "H1") valueScore += 80;
+          if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") valueScore += 60;
+          if (element.isContentEditable) valueScore += 40;
+          if (rect.height < 220) valueScore += 20;
+          valueScore -= rect.top / 10;
+        } else {
+          if (haystack.includes("正文") || haystack.includes("内容")) valueScore += 100;
+          if (element.isContentEditable) valueScore += 70;
+          if (element.tagName === "TEXTAREA") valueScore += 50;
+          valueScore += Math.min(rect.height, 1000) / 10;
+          valueScore -= rect.top / 20;
+        }
+        return valueScore;
+      };
+
+      const target = [...candidates].sort((a, b) => score(b) - score(a))[0];
+      if (!target) return false;
+
+      target.focus();
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+        const proto = Object.getPrototypeOf(target);
+        const valueDescriptor = Object.getOwnPropertyDescriptor(proto, "value");
+        if (valueDescriptor?.set) {
+          valueDescriptor.set.call(target, value);
+        } else {
+          target.value = value;
+        }
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+
+      if (target.isContentEditable) {
+        const selection = g.getSelection();
+        const range = d.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        const inserted = d.execCommand("insertText", false, value);
+        if (!inserted) {
+          target.textContent = value;
+          target.dispatchEvent(new w.InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+        }
+        return true;
+      }
+
+      return false;
+    },
+    { kind, value }
+  );
+}
+
+async function clickButtonByEvaluation(page: BrowserPage, labels: string[]): Promise<boolean> {
+  if (typeof page.evaluate !== "function") return false;
+  return page.evaluate(
+    ({ labels }) => {
+      const g = globalThis as any;
+      const d = g.document as any;
+      const w = g.window ?? g;
+      const isVisible = (element: any) => {
+        const style = w.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+      };
+
+      const candidates = Array.from(d.querySelectorAll('button, [role="button"], a, div, span')).filter((element: any) => {
+        if (!isVisible(element)) return false;
+        const haystack = [
+          element.textContent,
+          element.innerText,
+          element.getAttribute("aria-label"),
+          element.getAttribute("title")
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return labels.some((label: string) => haystack.includes(label));
+      }) as any[];
+
+      const target = candidates[0];
+      if (!target) return false;
+      target.click();
+      return true;
+    },
+    { labels }
+  );
 }
 
 export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOptions = {}): ZhihuBrowserPublisher {
@@ -268,7 +446,8 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
           'input[placeholder*="标题"]',
           ".WriteIndex-titleInput textarea",
           ".WriteIndex-titleInput input"
-        ], draft.title));
+        ], draft.title)) ||
+        (await fillEditorFieldByEvaluation(page, "title", draft.title));
       if (!titleFilled) {
         return {
           status: "NEEDS_USER_ACTION",
@@ -286,7 +465,8 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
           'textarea[placeholder*="正文"]',
           'textarea[placeholder*="内容"]',
           'textarea'
-        ], draft.body));
+        ], draft.body)) ||
+        (await fillEditorFieldByEvaluation(page, "body", draft.body));
       if (!bodyFilled) {
         return {
           status: "NEEDS_USER_ACTION",
@@ -294,7 +474,7 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
         };
       }
 
-      const clickedPublish = await clickButton(page, ["发布", "发表"]);
+      const clickedPublish = (await clickButton(page, ["发布", "发表"])) || (await clickButtonByEvaluation(page, ["发布", "发表"]));
       if (!clickedPublish) {
         return {
           status: "NEEDS_USER_ACTION",
@@ -302,7 +482,7 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
         };
       }
 
-      await clickButton(page, ["确认发布", "确定"]);
+      await clickButton(page, ["确认发布", "确定"]) || (await clickButtonByEvaluation(page, ["确认发布", "确定"]));
       return {
         status: "SUCCESS",
         message: "知乎文章已提交发布",
