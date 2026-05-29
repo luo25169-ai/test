@@ -5,10 +5,12 @@ import express from "express";
 import { z } from "zod";
 import { adaptForPlatforms, adaptForPlatformsWithAi, getPlatforms } from "./platforms/platform-registry.js";
 import { createConfiguredAiAdapter } from "./services/ai-adaptation-service.js";
+import { createBilibiliBrowserPublisher } from "./services/bilibili-browser.js";
 import { createPublishTask, getPublishTask, listPublishTasks } from "./services/publish-service.js";
 import { createWechatBrowserPublisher } from "./services/wechat-browser.js";
 import { createZhihuBrowserPublisher } from "./services/zhihu-browser.js";
 
+const bilibiliBrowserPublisher = createBilibiliBrowserPublisher();
 const wechatBrowserPublisher = createWechatBrowserPublisher();
 const zhihuBrowserPublisher = createZhihuBrowserPublisher();
 
@@ -103,6 +105,17 @@ app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
       return;
     }
 
+    if (platformId === "bilibili") {
+      try {
+        const result = await bilibiliBrowserPublisher.openLoginPage();
+        res.json({ platformId, ...result, message: loginMessages[platformId] });
+      } catch {
+        await openExternalLoginPage(platformLoginUrls[platformId]);
+        res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
+      }
+      return;
+    }
+
     await openExternalLoginPage(platformLoginUrls[platformId]);
     res.json({ platformId, url: platformLoginUrls[platformId], message: loginMessages[platformId] });
   } catch (error) {
@@ -142,7 +155,13 @@ app.post("/api/adapt", async (req, res, next) => {
 app.post("/api/publish", async (req, res, next) => {
   try {
     const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
-    res.status(201).json(await createPublishTask(body, { wechatPublisher: wechatBrowserPublisher, zhihuPublisher: zhihuBrowserPublisher }));
+    res.status(201).json(
+      await createPublishTask(body, {
+        bilibiliPublisher: bilibiliBrowserPublisher,
+        wechatPublisher: wechatBrowserPublisher,
+        zhihuPublisher: zhihuBrowserPublisher
+      })
+    );
   } catch (error) {
     next(error);
   }

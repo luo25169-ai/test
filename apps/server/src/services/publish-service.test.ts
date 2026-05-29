@@ -68,4 +68,36 @@ describe("publish service", () => {
     expect(task.results[0]?.status).toBe("NEEDS_USER_ACTION");
     expect(task.results[0]?.message).toContain("草稿已填入");
   });
+
+  it("routes Bilibili publishing through the browser dynamic filler", async () => {
+    const task = await createPublishTask(
+      {
+        draft: {
+          title: "AI 工具提升内容创作效率",
+          content: "今天测试一款 AI 内容工具。",
+          tags: ["AI", "效率"],
+          images: []
+        },
+        platformIds: ["bilibili"]
+      },
+      {
+        bilibiliPublisher: {
+          async openLoginPage() {
+            return { url: "https://passport.bilibili.com/login" };
+          },
+          async publish() {
+            return {
+              status: "NEEDS_USER_ACTION",
+              message: "B站动态内容已填入，请确认内容后手动发布"
+            };
+          }
+        }
+      }
+    );
+
+    expect(task.results[0]?.platformId).toBe("bilibili");
+    expect(task.status).toBe("PARTIAL");
+    expect(task.results[0]?.status).toBe("NEEDS_USER_ACTION");
+    expect(task.results[0]?.message).toContain("动态内容已填入");
+  });
 });

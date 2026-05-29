@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { adaptForPlatforms, platformRegistry } from "../platforms/platform-registry.js";
 import type { AdaptationResult, DraftContent, PublishResult } from "../platforms/types.js";
+import type { BilibiliBrowserPublisher } from "./bilibili-browser.js";
 import type { WechatBrowserPublisher } from "./wechat-browser.js";
 import type { ZhihuBrowserPublisher } from "./zhihu-browser.js";
 
@@ -26,6 +27,7 @@ export interface CreatePublishTaskInput {
 }
 
 export interface CreatePublishTaskOptions {
+  bilibiliPublisher?: BilibiliBrowserPublisher;
   wechatPublisher?: WechatBrowserPublisher;
   zhihuPublisher?: ZhihuBrowserPublisher;
 }
@@ -72,6 +74,16 @@ export async function createPublishTask(
             platform: item.platform,
             ...(await options.wechatPublisher.publish({
               title: item.content.title,
+              body: item.content.body,
+              tags: item.content.tags,
+              images: item.content.images
+            }))
+          }
+        : item.platformId === "bilibili" && options.bilibiliPublisher
+        ? {
+            platformId: item.platformId,
+            platform: item.platform,
+            ...(await options.bilibiliPublisher.publish({
               body: item.content.body,
               tags: item.content.tags,
               images: item.content.images
