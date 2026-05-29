@@ -258,12 +258,11 @@ async function clickFirstVisibleText(page: RednoteBrowserPage, texts: string[]):
         });
         const target = node?.closest?.(".creator-tab, button, [role='button']") ?? node;
         if (target && isVisible(target)) {
-          const rect = target.getBoundingClientRect();
-          const hitTarget = doc.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) ?? target;
           for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-            hitTarget.dispatchEvent(new win.MouseEvent(eventName, { bubbles: true, cancelable: true, view: win }));
+            target.dispatchEvent(new win.MouseEvent(eventName, { bubbles: true, cancelable: true, view: win }));
           }
           target.click();
+          const rect = target.getBoundingClientRect();
           return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
         }
       }
@@ -292,6 +291,23 @@ async function waitForAnyVisible(page: BrowserPage, checks: Array<() => Promise<
   }
 }
 
+async function switchToRednoteImageTextTab(page: RednoteBrowserPage): Promise<void> {
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) {
+    if ((await findFirstVisiblePlaceholder(page, ["填写标题", "请输入标题", "标题"])) !== null) return;
+    if ((await findFirstVisibleText(page, ["上传图片", "文字配图", "写文字", "生成图片"])) !== null) return;
+    await clickFirstVisibleText(page, ["上传图文"]);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+}
+
+async function isRednotePublishPageReady(page: BrowserPage): Promise<boolean> {
+  return (
+    page.url().includes("creator.xiaohongshu.com/publish") &&
+    (await findFirstVisibleText(page, ["写文字", "上传图片", "文字配图", "上传视频", "上传图文"])) !== null
+  );
+}
+
 async function isRednoteLoginRequired(page: BrowserPage): Promise<boolean> {
   const currentUrl = page.url();
   if (currentUrl.includes("/login")) return true;
@@ -306,6 +322,32 @@ async function isRednoteLoginRequired(page: BrowserPage): Promise<boolean> {
 
 async function fillText(page: RednoteBrowserPage, locator: BrowserLocator, value: string): Promise<void> {
   await locator.click();
+  if (page.evaluate) {
+    const filled = await page.evaluate((text) => {
+      const win = globalThis as any;
+      const doc = win.document;
+      const element = doc.activeElement;
+      if (!element) return false;
+      const editable = element.closest?.("[contenteditable='true']") ?? element;
+      if (editable.tagName === "TEXTAREA" || editable.tagName === "INPUT") {
+        editable.value = text;
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+        editable.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+      if (editable.getAttribute?.("contenteditable") === "true") {
+        editable.focus();
+        editable.textContent = "";
+        editable.dispatchEvent(new win.InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: text }));
+        doc.execCommand("selectAll", false);
+        doc.execCommand("insertText", false, text);
+        editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+        return true;
+      }
+      return false;
+    }, value);
+    if (filled) return;
+  }
   if (page.keyboard) {
     await page.keyboard.press("Meta+A");
   }
@@ -390,11 +432,13 @@ export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOp
         try {
           const currentPage = await getPage();
           page = currentPage;
-          await gotoAndIgnoreAbort(currentPage, rednotePublishUrl);
-          await currentPage.waitForLoadState("domcontentloaded");
+          if (!(await isRednotePublishPageReady(currentPage))) {
+            await gotoAndIgnoreAbort(currentPage, rednotePublishUrl);
+            await currentPage.waitForLoadState("domcontentloaded");
+          }
           await waitForAnyVisible(currentPage, [() => findFirstVisibleText(currentPage, ["上传图文"])], 10000);
           await new Promise((resolve) => setTimeout(resolve, 800));
-          await clickFirstVisibleText(currentPage, ["上传图文"]);
+          await switchToRednoteImageTextTab(currentPage);
           await waitForAnyVisible(currentPage, [
             () => findFirstVisiblePlaceholder(currentPage, ["填写标题", "请输入标题", "标题"]),
             () => findFirstVisibleText(currentPage, ["上传图片", "文字配图", "生成图片"]),

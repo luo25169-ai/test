@@ -103,7 +103,7 @@ function createTextToImagePage() {
   const textToImageButton = createFakeLocator();
   const visibleText = createFakeLocator();
   const hidden = hiddenLocator();
-  const state = { url: "https://creator.xiaohongshu.com/" };
+  const state = { url: rednotePublishUrl };
   const navigations: string[] = [];
   return {
     body,
@@ -179,11 +179,24 @@ describe("rednote browser publisher", () => {
       images: []
     });
 
-    expect(page.uploadTab.clickCalls).toBeGreaterThan(0);
-    expect(page.textToImageButton.clickCalls).toBeGreaterThan(0);
     expect(page.body.fillCalls).toContain("Rednote title\n\nRednote body #AI");
     expect(result.status).toBe("NEEDS_USER_ACTION");
     expect(result.message).toContain("文字配图");
+  });
+
+  it("keeps the current Rednote text-to-image page instead of resetting to the default video tab", async () => {
+    const page = createTextToImagePage();
+    const publisher = createRednoteBrowserPublisher({ openPage: async () => page });
+
+    await publisher.publish({
+      title: "Rednote title",
+      body: "Rednote body #AI",
+      tags: ["AI"],
+      images: []
+    });
+
+    expect(page.navigations).not.toContain(rednotePublishUrl);
+    expect(page.body.fillCalls).toContain("Rednote title\n\nRednote body #AI");
   });
 
   it("checks login state without reopening the login page", async () => {
