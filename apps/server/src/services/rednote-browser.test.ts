@@ -68,6 +68,7 @@ function createFakePage(options?: { loggedIn?: boolean }) {
     },
     getByText(text: string) {
       if (options?.loggedIn && text === "上传图文") return createFakeLocator();
+      if (options?.loggedIn && text === "发布") return createFakeLocator();
       if (!options?.loggedIn && (text === "登录" || text === "扫码登录")) return login;
       return hidden;
     },
@@ -145,6 +146,7 @@ function createTextToImagePage() {
       if (text === "文字配图") return textToImageButton;
       if (text === "生成图片") return generateButton;
       if (text === "写文字") return visibleText;
+      if (state.mode === "final" && text === "发布") return visibleText;
       return hidden;
     },
     isClosed() {
@@ -192,7 +194,7 @@ describe("rednote browser publisher", () => {
       images: []
     });
 
-    expect(page.promptBody.fillCalls).toContain("Rednote title\n\nRednote body #AI");
+    expect(page.promptBody.fillCalls).toContain("Rednote title\nRednote body #AI");
     expect(page.finalTitle.fillCalls).toContain("Rednote title");
     expect(page.finalBody.fillCalls).toContain("Rednote body #AI");
     expect(result.status).toBe("SUCCESS");
@@ -210,7 +212,7 @@ describe("rednote browser publisher", () => {
     });
 
     expect(page.navigations).not.toContain(rednotePublishUrl);
-    expect(page.promptBody.fillCalls).toContain("Rednote title\n\nRednote body #AI");
+    expect(page.promptBody.fillCalls).toContain("Rednote title\nRednote body #AI");
   });
 
   it("checks login state without reopening the login page", async () => {
