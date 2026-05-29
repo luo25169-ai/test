@@ -35,4 +35,37 @@ describe("publish service", () => {
     expect(task.results[0]?.status).toBe("FAILED");
     expect(task.logs.some((log) => log.message.includes("小红书图文至少需要 1 张图片"))).toBe(true);
   });
+
+  it("routes WeChat publishing through the browser draft filler", async () => {
+    const task = await createPublishTask(
+      {
+        draft: {
+          title: "AI 工具提升内容创作效率",
+          content:
+            "今天测试一款 AI 内容工具。它可以根据不同平台生成对应版本，并帮助创作者减少重复排版工作。",
+          tags: ["AI", "效率"],
+          images: [{ name: "cover.png", url: "https://example.com/cover.png", type: "image/png" }]
+        },
+        platformIds: ["wechat"]
+      },
+      {
+        wechatPublisher: {
+          async openLoginPage() {
+            return { url: "https://mp.weixin.qq.com/" };
+          },
+          async publish() {
+            return {
+              status: "NEEDS_USER_ACTION",
+              message: "公众号草稿已填入，请确认内容后手动发布"
+            };
+          }
+        }
+      }
+    );
+
+    expect(task.results[0]?.platformId).toBe("wechat");
+    expect(task.status).toBe("PARTIAL");
+    expect(task.results[0]?.status).toBe("NEEDS_USER_ACTION");
+    expect(task.results[0]?.message).toContain("草稿已填入");
+  });
 });

@@ -1,0 +1,147 @@
+import { describe, expect, it } from "vitest";
+import { createWechatBrowserPublisher, wechatArticleEditUrl, wechatLoginUrl } from "./wechat-browser.js";
+
+function createFakeLocator(visible = true) {
+  return {
+    fillCalls: [] as string[],
+    clickCalls: 0,
+    fill(value: string) {
+      this.fillCalls.push(value);
+      return Promise.resolve();
+    },
+    click() {
+      this.clickCalls += 1;
+      return Promise.resolve();
+    },
+    count() {
+      return Promise.resolve(visible ? 1 : 0);
+    },
+    first() {
+      return this;
+    },
+    isVisible() {
+      return Promise.resolve(visible);
+    }
+  };
+}
+
+function createHiddenLocator() {
+  return createFakeLocator(false);
+}
+
+function createFakePage() {
+  const title = createFakeLocator();
+  const body = createFakeLocator();
+  const hidden = createHiddenLocator();
+  const state = {
+    url: wechatLoginUrl
+  };
+  const navigations: string[] = [];
+  return {
+    title,
+    body,
+    navigations,
+    goto(url: string) {
+      navigations.push(url);
+      state.url = url;
+      return Promise.resolve();
+    },
+    waitForLoadState() {
+      return Promise.resolve();
+    },
+    url() {
+      return state.url;
+    },
+    locator(selector: string) {
+      if (selector.includes("title") || selector.includes("标题")) return title;
+      return hidden;
+    },
+    getByPlaceholder() {
+      return hidden;
+    },
+    getByText() {
+      return hidden;
+    },
+    frameLocator(selector: string) {
+      if (selector.includes("ueditor") || selector.includes("editor")) {
+        return {
+          locator(frameSelector: string) {
+            if (frameSelector.includes("body") || frameSelector.includes("contenteditable")) return body;
+            return hidden;
+          }
+        };
+      }
+      return {
+        locator() {
+          return hidden;
+        }
+      };
+    },
+    isClosed() {
+      return false;
+    }
+  };
+}
+
+function createLoginExpiredPage() {
+  const page = createFakePage();
+  const loginExpired = createFakeLocator();
+  return {
+    ...page,
+    getByText(text: string) {
+      if (text === "登录超时" || text === "请重新登录") return loginExpired;
+      return createHiddenLocator();
+    }
+  };
+}
+
+describe("wechat browser publisher", () => {
+  it("opens the WeChat public account login page", async () => {
+    const page = createFakePage();
+    const publisher = createWechatBrowserPublisher({
+      openPage: async () => page
+    });
+
+    const result = await publisher.openLoginPage();
+
+    expect(result.url).toBe(wechatLoginUrl);
+    expect(page.navigations).toContain(wechatLoginUrl);
+  });
+
+  it("fills the WeChat editor draft and stops before publishing", async () => {
+    const page = createFakePage();
+    const publisher = createWechatBrowserPublisher({
+      openPage: async () => page
+    });
+
+    const result = await publisher.publish({
+      title: "WeChat title",
+      body: "WeChat body",
+      tags: ["AI", "效率"],
+      images: [{ name: "cover.png", url: "https://example.com/cover.png" }]
+    });
+
+    expect(page.navigations).toContain(wechatArticleEditUrl);
+    expect(page.title.fillCalls).toContain("WeChat title");
+    expect(page.body.fillCalls).toContain("WeChat body");
+    expect(result.status).toBe("NEEDS_USER_ACTION");
+    expect(result.message).toContain("草稿已填入");
+  });
+
+  it("asks the user to log in again when the WeChat session has expired", async () => {
+    const page = createLoginExpiredPage();
+    const publisher = createWechatBrowserPublisher({
+      openPage: async () => page
+    });
+
+    const result = await publisher.publish({
+      title: "WeChat title",
+      body: "WeChat body",
+      tags: [],
+      images: []
+    });
+
+    expect(result.status).toBe("NEEDS_LOGIN");
+    expect(result.message).toContain("完成登录");
+  });
+});

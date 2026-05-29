@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { adaptForPlatforms, platformRegistry } from "../platforms/platform-registry.js";
 import type { AdaptationResult, DraftContent, PublishResult } from "../platforms/types.js";
+import type { WechatBrowserPublisher } from "./wechat-browser.js";
 import type { ZhihuBrowserPublisher } from "./zhihu-browser.js";
 
 export interface PublishLog {
@@ -25,6 +26,7 @@ export interface CreatePublishTaskInput {
 }
 
 export interface CreatePublishTaskOptions {
+  wechatPublisher?: WechatBrowserPublisher;
   zhihuPublisher?: ZhihuBrowserPublisher;
 }
 
@@ -64,7 +66,18 @@ export async function createPublishTask(
 
     log(logs, "info", `${item.platform} 校验通过，开始发布`);
     const result =
-      item.platformId === "zhihu" && options.zhihuPublisher
+      item.platformId === "wechat" && options.wechatPublisher
+        ? {
+            platformId: item.platformId,
+            platform: item.platform,
+            ...(await options.wechatPublisher.publish({
+              title: item.content.title,
+              body: item.content.body,
+              tags: item.content.tags,
+              images: item.content.images
+            }))
+          }
+        : item.platformId === "zhihu" && options.zhihuPublisher
         ? {
             platformId: item.platformId,
             platform: item.platform,
@@ -85,7 +98,8 @@ export async function createPublishTask(
   }
 
   const successCount = results.filter((result) => result.status === "SUCCESS").length;
-  const status = successCount === results.length ? "SUCCESS" : successCount === 0 ? "FAILED" : "PARTIAL";
+  const failedCount = results.filter((result) => result.status === "FAILED").length;
+  const status = successCount === results.length ? "SUCCESS" : failedCount === results.length ? "FAILED" : "PARTIAL";
   const task: PublishTask = {
     id,
     status,

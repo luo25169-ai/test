@@ -5,8 +5,10 @@ import { z } from "zod";
 import { adaptForPlatforms, adaptForPlatformsWithAi, getPlatforms } from "./platforms/platform-registry.js";
 import { createConfiguredAiAdapter } from "./services/ai-adaptation-service.js";
 import { createPublishTask, getPublishTask, listPublishTasks } from "./services/publish-service.js";
+import { createWechatBrowserPublisher } from "./services/wechat-browser.js";
 import { createZhihuBrowserPublisher } from "./services/zhihu-browser.js";
 
+const wechatBrowserPublisher = createWechatBrowserPublisher();
 const zhihuBrowserPublisher = createZhihuBrowserPublisher();
 
 const mediaFileSchema = z.object({
@@ -49,13 +51,19 @@ app.get("/api/accounts", (_req, res) => {
 app.post("/api/accounts/:platformId/open-login", async (req, res, next) => {
   try {
     const { platformId } = z.object({ platformId: z.enum(["wechat", "zhihu", "bilibili", "rednote"]) }).parse(req.params);
-    if (platformId !== "zhihu") {
-      res.status(400).json({ error: "暂不支持该平台的自动登录" });
+    if (platformId === "wechat") {
+      const result = await wechatBrowserPublisher.openLoginPage();
+      res.json({ platformId, ...result, message: "已打开公众号登录页，请完成登录后返回 ContentFlow 发布。" });
       return;
     }
 
-    const result = await zhihuBrowserPublisher.openLoginPage();
-    res.json({ platformId, ...result, message: "已打开知乎登录页，请完成登录后返回 ContentFlow 发布。" });
+    if (platformId === "zhihu") {
+      const result = await zhihuBrowserPublisher.openLoginPage();
+      res.json({ platformId, ...result, message: "已打开知乎登录页，请完成登录后返回 ContentFlow 发布。" });
+      return;
+    }
+
+    res.status(400).json({ error: "暂不支持该平台的自动登录" });
   } catch (error) {
     next(error);
   }
@@ -89,7 +97,7 @@ app.post("/api/adapt", async (req, res, next) => {
 app.post("/api/publish", async (req, res, next) => {
   try {
     const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
-    res.status(201).json(await createPublishTask(body, { zhihuPublisher: zhihuBrowserPublisher }));
+    res.status(201).json(await createPublishTask(body, { wechatPublisher: wechatBrowserPublisher, zhihuPublisher: zhihuBrowserPublisher }));
   } catch (error) {
     next(error);
   }
