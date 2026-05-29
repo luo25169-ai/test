@@ -49,6 +49,7 @@ const defaultAccountStatuses: Record<string, AccountStatus> = {
   bilibili: "NEEDS_LOGIN",
   rednote: "NEEDS_LOGIN"
 };
+const manualLoginConfirmationPlatforms = new Set(["rednote"]);
 
 function readStoredAccountStatuses(): Record<string, AccountStatus> {
   try {
@@ -193,8 +194,12 @@ export default function App() {
     setLoading(`login-check:${platformId}`);
     try {
       const result = await checkPlatformLogin(platformId);
-      if (result.connected) {
-        setAccountNotice(`${platformName}：已确认登录态，可以发布。`);
+      if (result.connected || manualLoginConfirmationPlatforms.has(platformId)) {
+        setAccountNotice(
+          result.connected
+            ? `${platformName}：已确认登录态，可以发布。`
+            : `${platformName}：已记录登录完成，发布时会再次校验登录态。`
+        );
         setAccountStatuses((current) => ({ ...current, [platformId]: "CONNECTED" }));
         setLoginOpenedPlatforms((current) => current.filter((id) => id !== platformId));
       } else {

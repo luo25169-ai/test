@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -115,19 +114,12 @@ function wrapPage(page: any): RednoteBrowserPage {
   };
 }
 
-async function waitForRemoteDebugger(port: number): Promise<void> {
-  const endpoint = `http://127.0.0.1:${port}/json/version`;
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(endpoint);
-      if (response.ok) return;
-    } catch {
-      // keep waiting
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+function terminateManagedChromeProcesses(): void {
+  try {
+    execFileSync("pkill", ["-f", "--", `--user-data-dir=${managedProfileDir}`], { stdio: "ignore" });
+  } catch {
+    // The managed browser may not be running. Starting a fresh persistent context can continue.
   }
-  throw new Error(`无法连接到小红书浏览器调试端口 ${port}`);
 }
 
 async function ensureManagedBrowser(
@@ -138,16 +130,14 @@ async function ensureManagedBrowser(
   if (managedBrowserPromise) return managedBrowserPromise;
 
   managedBrowserPromise = (async () => {
-    const endpoint = `http://127.0.0.1:${managedRemoteDebuggingPort}`;
-    try {
-      return await chromium.connectOverCDP(endpoint);
-    } catch {
-      await mkdir(managedProfileDir, { recursive: true });
-      spawn(
+    await mkdir(managedProfileDir, { recursive: true });
+    const launch = () =>
+      chromium.launchPersistentContext(managedProfileDir, {
         executablePath,
-        [
+        headless,
+        viewport: null,
+        args: [
           `--remote-debugging-port=${managedRemoteDebuggingPort}`,
-          `--user-data-dir=${managedProfileDir}`,
           "--no-first-run",
           "--no-default-browser-check",
           "--disable-sync",
@@ -155,11 +145,14 @@ async function ensureManagedBrowser(
           "--disable-infobars",
           "--enable-unsafe-swiftshader",
           headless ? "--headless=new" : "--start-maximized"
-        ].filter(Boolean),
-        { detached: true, stdio: "ignore" }
-      ).unref();
-      await waitForRemoteDebugger(managedRemoteDebuggingPort);
-      return chromium.connectOverCDP(endpoint);
+        ].filter(Boolean)
+      });
+    try {
+      return await launch();
+    } catch {
+      terminateManagedChromeProcesses();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return launch();
     }
   })();
 
@@ -172,8 +165,7 @@ async function ensureManagedBrowser(
 }
 
 async function ensureManagedPage(browser: any): Promise<RednoteBrowserPage> {
-  const contexts = browser.contexts();
-  const context = contexts[0] ?? (await browser.newContext());
+  const context = typeof browser.contexts === "function" ? browser.contexts()[0] ?? (await browser.newContext()) : browser;
   const pages = context.pages();
   return wrapPage(pages[0] ?? (await context.newPage()));
 }
@@ -194,6 +186,11 @@ async function gotoAndIgnoreAbort(page: BrowserPage, url: string): Promise<void>
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("ERR_ABORTED")) throw error;
   }
+}
+
+function isClosedBrowserError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Target page") && message.includes("closed");
 }
 
 async function findFirstVisibleLocator(page: BrowserPage, selectors: string[]): Promise<BrowserLocator | null> {
@@ -233,8 +230,13 @@ async function waitForAnyVisible(page: BrowserPage, checks: Array<() => Promise<
 async function isRednoteLoginRequired(page: BrowserPage): Promise<boolean> {
   const currentUrl = page.url();
   if (currentUrl.includes("/login")) return true;
+  if (
+    (await findFirstVisibleText(page, ["小红书创作服务平台", "发布笔记", "创作中心", "笔记管理", "数据中心"])) !== null
+  ) {
+    return false;
+  }
   if ((await findFirstVisibleLocator(page, ["[class*='login']", ".login-container", ".login-panel"])) !== null) return true;
-  return (await findFirstVisibleText(page, ["登录", "扫码登录", "手机号登录"])) !== null;
+  return (await findFirstVisibleText(page, ["扫码登录", "手机号登录", "密码登录", "登录小红书"])) !== null;
 }
 
 async function fillText(page: RednoteBrowserPage, locator: BrowserLocator, value: string): Promise<void> {
@@ -289,13 +291,21 @@ export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOp
     },
 
     async checkLoginStatus() {
-      const page = await getPage();
-      await gotoAndIgnoreAbort(page, "https://creator.xiaohongshu.com/");
-      await page.waitForLoadState("domcontentloaded");
-      if (await isRednoteLoginRequired(page)) {
-        return { connected: false, url: page.url() };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const page = await getPage();
+          await gotoAndIgnoreAbort(page, "https://creator.xiaohongshu.com/");
+          await page.waitForLoadState("domcontentloaded");
+          if (await isRednoteLoginRequired(page)) {
+            return { connected: false, url: page.url() };
+          }
+          return { connected: !(await isRednoteLoginRequired(page)), url: page.url() };
+        } catch (error) {
+          resetPersistentPage();
+          if (!isClosedBrowserError(error) || attempt === 1) throw error;
+        }
       }
-      return { connected: !(await isRednoteLoginRequired(page)), url: page.url() };
+      return { connected: false };
     },
 
     async publish(draft: RednotePublishDraft) {

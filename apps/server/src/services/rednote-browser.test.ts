@@ -75,6 +75,27 @@ function createFakePage(options?: { loggedIn?: boolean }) {
   };
 }
 
+function createLoggedInPageWithGenericLoginText() {
+  const page = createFakePage({ loggedIn: true });
+  return {
+    ...page,
+    getByText(text: string) {
+      if (text === "小红书创作服务平台" || text === "发布笔记" || text === "登录") return createFakeLocator();
+      return hiddenLocator();
+    }
+  };
+}
+
+function createClosedOncePage() {
+  const page = createFakePage();
+  return {
+    ...page,
+    goto() {
+      return Promise.reject(new Error("page.goto: Target page, context or browser has been closed"));
+    }
+  };
+}
+
 describe("rednote browser publisher", () => {
   it("opens the Rednote login page", async () => {
     const page = createFakePage();
@@ -111,5 +132,23 @@ describe("rednote browser publisher", () => {
 
     expect(result.connected).toBe(true);
     expect(page.navigations).not.toContain(rednoteLoginUrl);
+  });
+
+  it("treats the creator platform as logged in even when generic login text is visible", async () => {
+    const page = createLoggedInPageWithGenericLoginText();
+    const publisher = createRednoteBrowserPublisher({ openPage: async () => page });
+
+    const result = await publisher.checkLoginStatus();
+
+    expect(result.connected).toBe(true);
+  });
+
+  it("retries login checking when the remembered browser page was closed", async () => {
+    const pages = [createClosedOncePage(), createFakePage({ loggedIn: true })];
+    const publisher = createRednoteBrowserPublisher({ openPage: async () => pages.shift()! });
+
+    const result = await publisher.checkLoginStatus();
+
+    expect(result.connected).toBe(true);
   });
 });
