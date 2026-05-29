@@ -67,3 +67,15 @@ export async function publishContent(draft: DraftContent, platformIds: string[])
   if (!response.ok) throw new Error("发布任务创建失败");
   return (await response.json()) as PublishTask;
 }
+
+export async function openPlatformLogin(platformId: string) {
+  const response = await fetch(`/api/accounts/${platformId}/open-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!response.ok) {
+    const details = await response.json().catch(() => null);
+    throw new Error(details?.error ?? "打开登录页失败");
+  }
+  return (await response.json()) as { platformId: string; url: string; message: string };
+}

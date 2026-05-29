@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { adaptForPlatforms, platformRegistry } from "../platforms/platform-registry.js";
 import type { AdaptationResult, DraftContent, PublishResult } from "../platforms/types.js";
+import type { ZhihuBrowserPublisher } from "./zhihu-browser.js";
 
 export interface PublishLog {
   level: "info" | "warn" | "error";
@@ -23,13 +24,20 @@ export interface CreatePublishTaskInput {
   platformIds: string[];
 }
 
+export interface CreatePublishTaskOptions {
+  zhihuPublisher?: ZhihuBrowserPublisher;
+}
+
 const tasks: PublishTask[] = [];
 
 function log(logs: PublishLog[], level: PublishLog["level"], message: string): void {
   logs.push({ level, message, createdAt: new Date().toISOString() });
 }
 
-export async function createPublishTask(input: CreatePublishTaskInput): Promise<PublishTask> {
+export async function createPublishTask(
+  input: CreatePublishTaskInput,
+  options: CreatePublishTaskOptions = {}
+): Promise<PublishTask> {
   const id = randomUUID();
   const logs: PublishLog[] = [];
   log(logs, "info", `创建发布任务 ${id}`);
@@ -55,11 +63,23 @@ export async function createPublishTask(input: CreatePublishTaskInput): Promise<
     }
 
     log(logs, "info", `${item.platform} 校验通过，开始发布`);
-    const result = await adapter.publish({
-      taskId: id,
-      adaptedContent: item.content,
-      mode: "browser"
-    });
+    const result =
+      item.platformId === "zhihu" && options.zhihuPublisher
+        ? {
+            platformId: item.platformId,
+            platform: item.platform,
+            ...(await options.zhihuPublisher.publish({
+              title: item.content.title,
+              body: item.content.body,
+              tags: item.content.tags,
+              images: item.content.images
+            }))
+          }
+        : await adapter.publish({
+            taskId: id,
+            adaptedContent: item.content,
+            mode: "browser"
+          });
     log(logs, result.status === "SUCCESS" ? "info" : "error", result.message);
     results.push(result);
   }

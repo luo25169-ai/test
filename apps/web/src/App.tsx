@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { AdaptationResult, DraftContent, PublishTask } from "./api";
-import { adaptContent, publishContent } from "./api";
+import { adaptContent, openPlatformLogin, publishContent } from "./api";
 
 type View = "dashboard" | "editor" | "accounts" | "tasks" | "history";
 
@@ -48,6 +48,7 @@ export default function App() {
   const [activePreview, setActivePreview] = useState("wechat");
   const [loading, setLoading] = useState<"adapt" | "publish" | null>(null);
   const [error, setError] = useState("");
+  const [accountNotice, setAccountNotice] = useState("");
 
   const activeContent = useMemo(
     () => adapted.find((item) => item.platformId === activePreview) ?? adapted[0],
@@ -83,6 +84,17 @@ export default function App() {
       setError(err instanceof Error ? err.message : "发布失败");
     } finally {
       setLoading(null);
+    }
+  }
+
+  async function handleOpenLogin(platformId: string, platformName: string) {
+    setError("");
+    setAccountNotice("");
+    try {
+      const result = await openPlatformLogin(platformId);
+      setAccountNotice(`${platformName}：${result.message}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "打开登录页失败");
     }
   }
 
@@ -138,6 +150,7 @@ export default function App() {
         </header>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        {accountNotice && <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">{accountNotice}</div>}
         {aiNotice && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{aiNotice}</div>}
 
         {view === "dashboard" && (
@@ -301,7 +314,12 @@ export default function App() {
                   </div>
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">CONNECTED</span>
                 </div>
-                <button className="rounded-md border border-line px-3 py-2 text-sm">打开平台登录页</button>
+                <button
+                  onClick={() => handleOpenLogin(platform.id, platform.name)}
+                  className="rounded-md border border-line px-3 py-2 text-sm"
+                >
+                  打开平台登录页
+                </button>
               </div>
             ))}
           </section>
