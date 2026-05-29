@@ -25,6 +25,7 @@ export interface BrowserPage {
   url(): string;
   locator(selector: string): BrowserLocator;
   getByText(text: string, options?: { exact?: boolean }): BrowserLocator;
+  isClosed(): boolean;
 }
 
 export interface ZhihuBrowserPublisher {
@@ -62,8 +63,14 @@ async function ensurePersistentPage(options: ZhihuBrowserPublisherOptions): Prom
     viewport: null
   });
   const pages = context.pages();
-  return wrapPage(pages[0] ?? (await context.newPage()));
+  const page = wrapPage(pages[0] ?? (await context.newPage()));
+  persistentContext = context;
+  persistentPage = page;
+  return page;
 }
+
+let persistentContext: any | null = null;
+let persistentPage: BrowserPage | null = null;
 
 function wrapLocator(locator: any): BrowserLocator {
   return {
@@ -101,6 +108,9 @@ function wrapPage(page: any): BrowserPage {
     },
     getByText(text: string, options?: { exact?: boolean }) {
       return wrapLocator(page.getByText(text, options));
+    },
+    isClosed() {
+      return typeof page.isClosed === "function" ? page.isClosed() : false;
     }
   };
 }
@@ -152,10 +162,15 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
     if (options.openPage) {
       return wrapPage(await options.openPage());
     }
+    if (persistentPage && !persistentPage.isClosed()) {
+      return persistentPage;
+    }
     if (!persistentPagePromise) {
       persistentPagePromise = ensurePersistentPage(options);
     }
-    return persistentPagePromise;
+    const page = await persistentPagePromise;
+    persistentPage = page;
+    return page;
   }
 
   return {

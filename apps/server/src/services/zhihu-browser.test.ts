@@ -22,6 +22,9 @@ function createFakeLocator() {
     isVisible() {
       return Promise.resolve(true);
     },
+    isClosed() {
+      return false;
+    },
     textContent() {
       return Promise.resolve(null);
     }
@@ -73,6 +76,9 @@ function createFakePage(options?: { loginPage?: boolean }) {
       if (text === "确认发布" || text === "确定") return confirm;
       if (text === "验证码登录" || text === "密码登录" || text === "登录/注册") return hidden;
       return hidden;
+    },
+    isClosed() {
+      return false;
     }
   };
 }
