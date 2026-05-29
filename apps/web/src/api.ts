@@ -77,5 +77,5 @@ export async function openPlatformLogin(platformId: string) {
     const details = await response.json().catch(() => null);
     throw new Error(details?.error ?? "打开登录页失败");
   }
-  return (await response.json()) as { platformId: string; url: string; message: string };
+  return (await response.json()) as { platformId: string; url: string; message: string; connected?: boolean };
 }

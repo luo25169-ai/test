@@ -141,7 +141,12 @@ export default function App() {
     try {
       const result = await openPlatformLogin(platformId);
       setAccountNotice(`${platformName}：${result.message}`);
-      setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
+      if (result.connected) {
+        setAccountStatuses((current) => ({ ...current, [platformId]: "CONNECTED" }));
+        setLoginOpenedPlatforms((current) => current.filter((id) => id !== platformId));
+      } else {
+        setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "打开登录页失败");
     }

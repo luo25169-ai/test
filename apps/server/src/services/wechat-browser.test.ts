@@ -29,10 +29,11 @@ function createHiddenLocator() {
   return createFakeLocator(false);
 }
 
-function createFakePage() {
+function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: boolean }) {
   const title = createFakeLocator();
   const body = createFakeLocator();
   const hidden = createHiddenLocator();
+  const accountNameRequired = createFakeLocator();
   const state = {
     url: wechatLoginUrl
   };
@@ -43,7 +44,11 @@ function createFakePage() {
     navigations,
     goto(url: string) {
       navigations.push(url);
-      state.url = url;
+      if (url === wechatLoginUrl && options?.loggedIn) {
+        state.url = "https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token=123456";
+      } else {
+        state.url = url;
+      }
       return Promise.resolve();
     },
     waitForLoadState() {
@@ -59,7 +64,8 @@ function createFakePage() {
     getByPlaceholder() {
       return hidden;
     },
-    getByText() {
+    getByText(text: string) {
+      if (options?.accountNameRequired && (text === "当前公众号名称" || text === "修改名称")) return accountNameRequired;
       return hidden;
     },
     frameLocator(selector: string) {
@@ -109,7 +115,7 @@ describe("wechat browser publisher", () => {
   });
 
   it("fills the WeChat editor draft and stops before publishing", async () => {
-    const page = createFakePage();
+    const page = createFakePage({ loggedIn: true });
     const publisher = createWechatBrowserPublisher({
       openPage: async () => page
     });
@@ -121,7 +127,7 @@ describe("wechat browser publisher", () => {
       images: [{ name: "cover.png", url: "https://example.com/cover.png" }]
     });
 
-    expect(page.navigations).toContain(wechatArticleEditUrl);
+    expect(page.navigations).toContain(`${wechatArticleEditUrl}&action=edit&type=10&lang=zh_CN&token=123456`);
     expect(page.title.fillCalls).toContain("WeChat title");
     expect(page.body.fillCalls).toContain("WeChat body");
     expect(result.status).toBe("NEEDS_USER_ACTION");
@@ -143,5 +149,23 @@ describe("wechat browser publisher", () => {
 
     expect(result.status).toBe("NEEDS_LOGIN");
     expect(result.message).toContain("完成登录");
+  });
+
+  it("stops with a clear action when the WeChat account profile blocks editing", async () => {
+    const page = createFakePage({ loggedIn: true, accountNameRequired: true });
+    const publisher = createWechatBrowserPublisher({
+      openPage: async () => page
+    });
+
+    const result = await publisher.publish({
+      title: "WeChat title",
+      body: "WeChat body",
+      tags: [],
+      images: []
+    });
+
+    expect(result.status).toBe("NEEDS_USER_ACTION");
+    expect(result.message).toContain("修改公众号名称");
+    expect(page.title.fillCalls).toHaveLength(0);
   });
 });

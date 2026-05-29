@@ -23,7 +23,7 @@ export interface WechatBrowserPage extends BrowserPage {
 }
 
 export interface WechatBrowserPublisher {
-  openLoginPage(): Promise<{ url: string }>;
+  openLoginPage(): Promise<{ url: string; connected?: boolean }>;
   publish(draft: WechatPublishDraft): Promise<{
     status: "SUCCESS" | "NEEDS_LOGIN" | "NEEDS_USER_ACTION";
     message: string;
@@ -247,6 +247,22 @@ async function isWechatLoginRequired(page: WechatBrowserPage): Promise<boolean> 
   return loginHints !== null;
 }
 
+function createWechatArticleEditUrl(page: WechatBrowserPage): string {
+  try {
+    const token = new URL(page.url()).searchParams.get("token");
+    if (token) {
+      return `${wechatArticleEditUrl}&action=edit&type=10&lang=zh_CN&token=${token}`;
+    }
+  } catch {
+    // Fall back to the base URL below.
+  }
+  return wechatArticleEditUrl;
+}
+
+async function isWechatAccountProfileBlockingEditor(page: WechatBrowserPage): Promise<boolean> {
+  return (await findFirstVisibleText(page, ["当前公众号名称", "请尽快修改名称", "修改名称"])) !== null;
+}
+
 async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<boolean> {
   const bodySelectors = [
     "#ueditor_0 body",
@@ -299,7 +315,7 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
         await page.waitForLoadState("domcontentloaded");
         await page.bringToFront?.();
         activateChromeWindow();
-        return { url: wechatLoginUrl };
+        return { url: page.url(), connected: createWechatArticleEditUrl(page) !== wechatArticleEditUrl };
       } catch (error) {
         resetPersistentPage();
         throw error;
@@ -310,7 +326,19 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
       let page: WechatBrowserPage;
       try {
         page = await getPage();
-        await gotoAndIgnoreAbort(page, wechatArticleEditUrl);
+        await gotoAndIgnoreAbort(page, wechatLoginUrl);
+        await page.waitForLoadState("domcontentloaded");
+        await page.bringToFront?.();
+        activateChromeWindow();
+
+        if (await isWechatLoginRequired(page)) {
+          return {
+            status: "NEEDS_LOGIN",
+            message: "请先在已打开的公众号页面完成登录，再重新点击发布"
+          };
+        }
+
+        await gotoAndIgnoreAbort(page, createWechatArticleEditUrl(page));
         await page.waitForLoadState("domcontentloaded");
         await page.bringToFront?.();
         activateChromeWindow();
@@ -327,6 +355,13 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
         return {
           status: "NEEDS_LOGIN",
           message: "请先在已打开的公众号页面完成登录，再重新点击发布"
+        };
+      }
+
+      if (await isWechatAccountProfileBlockingEditor(page)) {
+        return {
+          status: "NEEDS_USER_ACTION",
+          message: "当前公众号资料未完成，请先在公众号后台修改公众号名称后再发布"
         };
       }
 
