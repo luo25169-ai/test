@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 export const zhihuLoginUrl = "https://www.zhihu.com/signin";
@@ -26,6 +27,7 @@ export interface BrowserPage {
   locator(selector: string): BrowserLocator;
   getByText(text: string, options?: { exact?: boolean }): BrowserLocator;
   isClosed(): boolean;
+  bringToFront?(): Promise<void>;
 }
 
 export interface ZhihuBrowserPublisher {
@@ -72,6 +74,16 @@ async function ensurePersistentPage(options: ZhihuBrowserPublisherOptions): Prom
 let persistentContext: any | null = null;
 let persistentPage: BrowserPage | null = null;
 
+function activateChromeWindow(): void {
+  try {
+    execFileSync("osascript", ["-e", 'tell application "Google Chrome" to activate'], {
+      stdio: "ignore"
+    });
+  } catch {
+    // Best effort only. If activation fails, the login window may still be open in Chrome.
+  }
+}
+
 function wrapLocator(locator: any): BrowserLocator {
   return {
     async count() {
@@ -111,6 +123,11 @@ function wrapPage(page: any): BrowserPage {
     },
     isClosed() {
       return typeof page.isClosed === "function" ? page.isClosed() : false;
+    },
+    async bringToFront() {
+      if (typeof page.bringToFront === "function") {
+        await page.bringToFront();
+      }
     }
   };
 }
@@ -165,6 +182,11 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
     if (persistentPage && !persistentPage.isClosed()) {
       return persistentPage;
     }
+    if (persistentPage && persistentPage.isClosed()) {
+      persistentPage = null;
+      persistentPagePromise = null;
+      persistentContext = null;
+    }
     if (!persistentPagePromise) {
       persistentPagePromise = ensurePersistentPage(options);
     }
@@ -175,16 +197,34 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
 
   return {
     async openLoginPage() {
-      const page = await getPage();
-      await page.goto(zhihuLoginUrl, { waitUntil: "domcontentloaded" });
-      await page.waitForLoadState("domcontentloaded");
-      return { url: zhihuLoginUrl };
+      try {
+        const page = await getPage();
+        await page.goto(zhihuLoginUrl, { waitUntil: "domcontentloaded" });
+        await page.waitForLoadState("domcontentloaded");
+        await page.bringToFront?.();
+        activateChromeWindow();
+        return { url: zhihuLoginUrl };
+      } catch (error) {
+        persistentPage = null;
+        persistentPagePromise = null;
+        persistentContext = null;
+        throw error;
+      }
     },
 
     async publish(draft: ZhihuPublishDraft) {
       const page = await getPage();
-      await page.goto(zhihuArticleWriteUrl, { waitUntil: "domcontentloaded" });
-      await page.waitForLoadState("domcontentloaded");
+      try {
+        await page.goto(zhihuArticleWriteUrl, { waitUntil: "domcontentloaded" });
+        await page.waitForLoadState("domcontentloaded");
+        await page.bringToFront?.();
+        activateChromeWindow();
+      } catch (error) {
+        persistentPage = null;
+        persistentPagePromise = null;
+        persistentContext = null;
+        throw error;
+      }
 
       if (await isZhihuLoginPage(page)) {
         return {
