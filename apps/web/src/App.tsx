@@ -46,7 +46,7 @@ export default function App() {
   const [aiNotice, setAiNotice] = useState("");
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [activePreview, setActivePreview] = useState("wechat");
-  const [loading, setLoading] = useState<"adapt" | "publish" | null>(null);
+  const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [accountNotice, setAccountNotice] = useState("");
 
@@ -72,14 +72,14 @@ export default function App() {
     }
   }
 
-  async function handlePublish() {
+  async function handlePublish(platformIds: string[] = selectedPlatforms, nextView: View = "tasks") {
     setError("");
-    setLoading("publish");
+    setLoading(`publish:${platformIds.join(",")}`);
     try {
-      const task = await publishContent(draft, selectedPlatforms);
+      const task = await publishContent(draft, platformIds);
       setTasks((current) => [task, ...current]);
       setAdapted(task.adapted);
-      setView("tasks");
+      setView(nextView);
     } catch (err) {
       setError(err instanceof Error ? err.message : "发布失败");
     } finally {
@@ -140,11 +140,11 @@ export default function App() {
             <p className="text-sm text-muted">一份内容，多平台适配，发布过程可追踪。</p>
           </div>
           <button
-            onClick={handlePublish}
+            onClick={() => handlePublish()}
             disabled={loading !== null}
             className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
-            {loading === "publish" ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+            {loading?.startsWith("publish:") ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
             一键发布
           </button>
         </header>
@@ -257,10 +257,10 @@ export default function App() {
                   <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
                     {adaptMode === "ai" ? "火山方舟 AI 改写" : "规则适配"}
                   </span>
-                  <button onClick={handlePublish} className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm text-white">
-                    <Send size={16} />
-                    发布
-                  </button>
+                <button onClick={() => handlePublish()} className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm text-white">
+                  <Send size={16} />
+                  发布
+                </button>
                 </div>
               </div>
             </div>
@@ -314,12 +314,22 @@ export default function App() {
                   </div>
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">CONNECTED</span>
                 </div>
-                <button
-                  onClick={() => handleOpenLogin(platform.id, platform.name)}
-                  className="rounded-md border border-line px-3 py-2 text-sm"
-                >
-                  打开平台登录页
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handleOpenLogin(platform.id, platform.name)}
+                    className="rounded-md border border-line px-3 py-2 text-sm"
+                  >
+                    打开平台登录页
+                  </button>
+                  <button
+                    onClick={() => handlePublish([platform.id])}
+                    disabled={loading === `publish:${platform.id}`}
+                    className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
+                  >
+                    {loading === `publish:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                    发布到{platform.name}
+                  </button>
+                </div>
               </div>
             ))}
           </section>
