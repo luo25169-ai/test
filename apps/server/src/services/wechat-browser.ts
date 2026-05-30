@@ -226,7 +226,11 @@ async function ensureManagedPage(browser: any): Promise<WechatBrowserPage> {
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
   const pages = context.pages();
-  return wrapPage(pages[0] ?? (await context.newPage()));
+  const platformPage = pages.find((page: any) => {
+    const url = typeof page.url === "function" ? page.url() : "";
+    return url.includes("mp.weixin.qq.com");
+  });
+  return wrapPage(platformPage ?? (await context.newPage()));
 }
 
 async function ensurePersistentPage(options: WechatBrowserPublisherOptions): Promise<WechatBrowserPage> {

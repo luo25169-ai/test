@@ -172,13 +172,21 @@ app.post("/api/accounts/:platformId/check-login", async (req, res, next) => {
   try {
     const { platformId } = z.object({ platformId: z.enum(["wechat", "zhihu", "bilibili", "rednote"]) }).parse(req.params);
     if (platformId === "bilibili") {
-      const result = await bilibiliBrowserPublisher.checkLoginStatus();
-      res.json({ platformId, ...result, message: result.connected ? "已检测到 B站登录态" : "还没有检测到 B站登录态" });
+      try {
+        const result = await bilibiliBrowserPublisher.checkLoginStatus();
+        res.json({ platformId, ...result, message: result.connected ? "已检测到 B站登录态" : "还没有检测到 B站登录态" });
+      } catch {
+        res.json({ platformId, connected: false, message: "B站登录态自动检测失败，已按手动确认处理" });
+      }
       return;
     }
     if (platformId === "rednote") {
-      const result = await rednoteBrowserPublisher.checkLoginStatus();
-      res.json({ platformId, ...result, message: result.connected ? "已检测到小红书登录态" : "还没有检测到小红书登录态" });
+      try {
+        const result = await rednoteBrowserPublisher.checkLoginStatus();
+        res.json({ platformId, ...result, message: result.connected ? "已检测到小红书登录态" : "还没有检测到小红书登录态" });
+      } catch {
+        res.json({ platformId, connected: false, message: "小红书登录态自动检测失败，已按手动确认处理" });
+      }
       return;
     }
     res.json({ platformId, connected: false, message: "该平台暂未接入登录态检测" });

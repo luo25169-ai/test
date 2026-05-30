@@ -40,6 +40,8 @@ const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_BILIBILI_BROWS
 const managedProfileDir =
   process.env.CONTENTFLOW_BILIBILI_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/bilibili-managed");
 
+let activeRemoteDebuggingPort = managedRemoteDebuggingPort;
+let activeProfileDir = managedProfileDir;
 let persistentPage: BilibiliBrowserPage | null = null;
 let persistentPagePromise: Promise<BilibiliBrowserPage> | null = null;
 let managedBrowserPromise: Promise<any> | null = null;
@@ -142,33 +144,68 @@ async function ensureManagedBrowser(
 ): Promise<any> {
   if (managedBrowserPromise) return managedBrowserPromise;
 
+  async function connectToPort(port: number) {
+    return chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  }
+
+  async function launchOnPort(port: number, profileDir: string) {
+    await mkdir(profileDir, { recursive: true });
+    spawn(
+      executablePath,
+      [
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profileDir}`,
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--disable-background-networking",
+        "--disable-popup-blocking",
+        "--disable-infobars",
+        "--enable-unsafe-swiftshader",
+        headless ? "--headless=new" : "--start-maximized"
+      ].filter(Boolean),
+      {
+        detached: true,
+        stdio: "ignore"
+      }
+    ).unref();
+    await waitForRemoteDebugger(port);
+    return connectToPort(port);
+  }
+
+  async function launchFallbackBrowser(error: unknown) {
+    let lastError = error;
+    for (let index = 1; index <= 5; index += 1) {
+      const port = managedRemoteDebuggingPort + 100 + index;
+      const profileDir = `${managedProfileDir}-${port}`;
+      try {
+        const browser = await launchOnPort(port, profileDir);
+        activeRemoteDebuggingPort = port;
+        activeProfileDir = profileDir;
+        return browser;
+      } catch (nextError) {
+        lastError = nextError;
+      }
+    }
+    throw lastError;
+  }
+
+  function shouldUseFallbackPort(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Browser.setDownloadBehavior") || message.includes("Browser context management is not supported");
+  }
+
   managedBrowserPromise = (async () => {
-    const endpoint = `http://127.0.0.1:${managedRemoteDebuggingPort}`;
     try {
-      return await chromium.connectOverCDP(endpoint);
-    } catch {
-      await mkdir(managedProfileDir, { recursive: true });
-      spawn(
-        executablePath,
-        [
-          `--remote-debugging-port=${managedRemoteDebuggingPort}`,
-          `--user-data-dir=${managedProfileDir}`,
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--disable-sync",
-          "--disable-background-networking",
-          "--disable-popup-blocking",
-          "--disable-infobars",
-          "--enable-unsafe-swiftshader",
-          headless ? "--headless=new" : "--start-maximized"
-        ].filter(Boolean),
-        {
-          detached: true,
-          stdio: "ignore"
-        }
-      ).unref();
-      await waitForRemoteDebugger(managedRemoteDebuggingPort);
-      return chromium.connectOverCDP(endpoint);
+      return await connectToPort(activeRemoteDebuggingPort);
+    } catch (connectError) {
+      if (shouldUseFallbackPort(connectError)) return launchFallbackBrowser(connectError);
+      try {
+        return await launchOnPort(activeRemoteDebuggingPort, activeProfileDir);
+      } catch (launchError) {
+        if (shouldUseFallbackPort(launchError)) return launchFallbackBrowser(launchError);
+        throw launchError;
+      }
     }
   })();
 
@@ -184,7 +221,11 @@ async function ensureManagedPage(browser: any): Promise<BilibiliBrowserPage> {
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
   const pages = context.pages();
-  return wrapPage(pages[0] ?? (await context.newPage()));
+  const platformPage = pages.find((page: any) => {
+    const url = typeof page.url === "function" ? page.url() : "";
+    return url.includes("bilibili.com");
+  });
+  return wrapPage(platformPage ?? (await context.newPage()));
 }
 
 async function ensurePersistentPage(options: BilibiliBrowserPublisherOptions): Promise<BilibiliBrowserPage> {
@@ -399,6 +440,7 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
     if (persistentPage) {
       try {
         if (!persistentPage.isClosed()) return persistentPage;
+        resetPersistentPage();
       } catch {
         resetPersistentPage();
       }
