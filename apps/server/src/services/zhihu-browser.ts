@@ -342,10 +342,10 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
       try {
         const page = await getPage();
         await gotoAndIgnoreAbort(page, zhihuLoginUrl);
-        await page.waitForLoadState("domcontentloaded");
+        await page.waitForLoadState("domcontentloaded").catch(() => undefined);
         await page.bringToFront?.();
         activateChromeWindow();
-        return { url: zhihuLoginUrl };
+        return { url: page.url?.() ?? zhihuLoginUrl };
       } catch (error) {
         persistentPage = null;
         persistentPagePromise = null;

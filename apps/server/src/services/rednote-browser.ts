@@ -861,7 +861,7 @@ export function createRednoteBrowserPublisher(options: RednoteBrowserPublisherOp
     async openLoginPage() {
       const page = await getPage();
       await gotoAndIgnoreAbort(page, rednoteLoginUrl);
-      await page.waitForLoadState("domcontentloaded");
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
       await page.bringToFront?.();
       activateChromeWindow();
       return { url: page.url(), connected: !(await isRednoteLoginRequired(page)) };

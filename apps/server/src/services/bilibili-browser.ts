@@ -367,15 +367,15 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
     async openLoginPage() {
       const page = await getPage();
       await gotoAndIgnoreAbort(page, bilibiliDynamicUrl);
-      await page.waitForLoadState("domcontentloaded");
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
       await waitForAnyVisible(page, [
         () => findFirstVisibleLocator(page, [".go-login-btn", ".bili-dyn-login-register__login-btn"]),
         () => findFirstVisiblePlaceholder(page, ["说点什么", "发一条友善的动态", "分享你的动态"]),
         () => findFirstVisibleLocator(page, ["div[contenteditable='true']", "[contenteditable='true']", ".ql-editor", ".ProseMirror"])
-      ]);
+      ]).catch(() => undefined);
       if (await isBilibiliLoginRequired(page)) {
         await gotoAndIgnoreAbort(page, bilibiliLoginUrl);
-        await page.waitForLoadState("domcontentloaded");
+        await page.waitForLoadState("domcontentloaded").catch(() => undefined);
       }
       await page.bringToFront?.();
       activateChromeWindow();

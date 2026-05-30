@@ -312,7 +312,7 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
       try {
         const page = await getPage();
         await gotoAndIgnoreAbort(page, wechatLoginUrl);
-        await page.waitForLoadState("domcontentloaded");
+        await page.waitForLoadState("domcontentloaded").catch(() => undefined);
         await page.bringToFront?.();
         activateChromeWindow();
         return { url: page.url(), connected: createWechatArticleEditUrl(page) !== wechatArticleEditUrl };
