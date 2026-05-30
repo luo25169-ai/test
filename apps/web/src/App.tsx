@@ -9,6 +9,7 @@ import {
   Link2,
   Loader2,
   Megaphone,
+  RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -237,6 +238,26 @@ export default function App() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "打开登录页失败");
+    }
+  }
+
+  async function handleSwitchAccount(platformId: string, platformName: string) {
+    setError("");
+    setAccountNotice("");
+    setLoading(`switch-account:${platformId}`);
+    setAccountStatuses((current) => ({ ...current, [platformId]: "NEEDS_LOGIN" }));
+    setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
+
+    try {
+      const result = await openPlatformLogin(platformId);
+      setAccountNotice(`${platformName}：已打开账号切换页，请在平台页面退出当前账号或切换账号，完成后再点击“我已完成登录”。`);
+      if (!result.connected) {
+        setLoginOpenedPlatforms((current) => (current.includes(platformId) ? current : [...current, platformId]));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "切换账号失败");
+    } finally {
+      setLoading(null);
     }
   }
 
@@ -543,14 +564,26 @@ export default function App() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {canPublish ? (
-                      <button
-                        onClick={() => requestPublishPreview(platform.id)}
-                        disabled={loading !== null}
-                        className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
-                      >
-                        {loading === `preview:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                        发布到{platform.name}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => requestPublishPreview(platform.id)}
+                          disabled={loading !== null}
+                          className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
+                        >
+                          {loading === `preview:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                          发布到{platform.name}
+                        </button>
+                        {accountStatuses[platform.id] === "CONNECTED" && (
+                          <button
+                            onClick={() => handleSwitchAccount(platform.id, platform.name)}
+                            disabled={loading !== null}
+                            className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm disabled:opacity-60"
+                          >
+                            {loading === `switch-account:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                            切换账号
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <>
                         <button
