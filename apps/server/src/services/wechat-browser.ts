@@ -287,7 +287,123 @@ async function isWechatAccountProfileBlockingEditor(page: WechatBrowserPage): Pr
   return (await findFirstVisibleText(page, ["当前公众号名称", "请尽快修改名称", "修改名称"])) !== null;
 }
 
+async function fillWechatBodyByPageScript(page: WechatBrowserPage, body: string): Promise<boolean> {
+  if (!page.evaluate) return false;
+  return page.evaluate((rawBody) => {
+    const doc = (globalThis as any).document;
+    const win = globalThis as any;
+    const titleSelectors = [
+      "#title",
+      "#activity-name",
+      "#js_title",
+      "#js_title_area",
+      "input[name='title']",
+      "textarea[name='title']",
+      "[placeholder*='标题']",
+      "[data-placeholder*='标题']",
+      "[aria-label*='标题']",
+      "[class*='title']",
+      "[id*='title']"
+    ];
+    const isVisible = (element: any) => {
+      const rect = element.getBoundingClientRect();
+      const style = win.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const isTitleLike = (element: any) => titleSelectors.some((selector) => element.matches?.(selector) || element.closest?.(selector));
+    const insertInto = (element: any) => {
+      if (!element || isTitleLike(element)) return false;
+      element.scrollIntoView?.({ block: "center", inline: "center" });
+      element.click?.();
+      element.focus?.();
+      const editable = element.closest?.("[contenteditable='true']") ?? element;
+      if (!editable || isTitleLike(editable)) return false;
+      if (editable.tagName === "TEXTAREA" || editable.tagName === "INPUT") {
+        const prototype = editable.tagName === "TEXTAREA" ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (setter) setter.call(editable, rawBody);
+        else editable.value = rawBody;
+        editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawBody }));
+        editable.dispatchEvent(new win.Event("change", { bubbles: true }));
+        return true;
+      }
+      if (editable.getAttribute?.("contenteditable") === "true") {
+        editable.textContent = "";
+        editable.dispatchEvent(new win.InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: rawBody }));
+        doc.execCommand("insertText", false, rawBody);
+        editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawBody }));
+        return true;
+      }
+      return false;
+    };
+
+    const placeholderMatches = Array.from(doc.querySelectorAll("div, p, span, section, [contenteditable='true']")).filter((element: any) => {
+      const text = [
+        element.innerText,
+        element.textContent,
+        element.getAttribute?.("placeholder"),
+        element.getAttribute?.("data-placeholder"),
+        element.getAttribute?.("aria-label")
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return isVisible(element) && !isTitleLike(element) && (text.includes("从这里开始写正文") || text.includes("请输入正文"));
+    }) as any[];
+    for (const placeholder of placeholderMatches) {
+      if (insertInto(placeholder)) return true;
+      const editable = placeholder.closest?.("[contenteditable='true']");
+      if (insertInto(editable)) return true;
+      const nearbyEditable =
+        placeholder.parentElement?.querySelector?.("[contenteditable='true']") ??
+        placeholder.parentElement?.parentElement?.querySelector?.("[contenteditable='true']");
+      if (insertInto(nearbyEditable)) return true;
+    }
+
+    const titleBottom = Math.max(
+      0,
+      ...titleSelectors.flatMap((selector) =>
+        Array.from(doc.querySelectorAll(selector))
+          .filter(isVisible)
+          .map((element: any) => element.getBoundingClientRect().bottom)
+      )
+    );
+    const editableCandidates = Array.from(
+      doc.querySelectorAll(
+        "[contenteditable='true'][data-placeholder*='正文'], [contenteditable='true'][aria-label*='正文'], [contenteditable='true'][placeholder*='正文'], #js_editor [contenteditable='true'], .editor [contenteditable='true'], .ProseMirror, .ql-editor"
+      )
+    ).filter((element: any) => {
+      const rect = element.getBoundingClientRect();
+      return isVisible(element) && !isTitleLike(element) && rect.top > titleBottom;
+    }) as any[];
+    for (const candidate of editableCandidates) {
+      if (insertInto(candidate)) return true;
+    }
+
+    for (const frame of Array.from(doc.querySelectorAll("iframe")) as any[]) {
+      const frameDoc = frame.contentDocument;
+      if (!frameDoc) continue;
+      const frameCandidates = Array.from(
+        frameDoc.querySelectorAll("body[contenteditable='true'], [contenteditable='true'], .ProseMirror, .ql-editor, #js_editor, .editor, body")
+      ).filter((element: any) => isVisible(element)) as any[];
+      for (const candidate of frameCandidates) {
+        candidate.scrollIntoView?.({ block: "center", inline: "center" });
+        candidate.click?.();
+        candidate.focus?.();
+        if (candidate.getAttribute?.("contenteditable") === "true" || candidate.tagName === "BODY") {
+          candidate.textContent = "";
+          frameDoc.execCommand("insertText", false, rawBody);
+          candidate.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawBody }));
+          return true;
+        }
+      }
+    }
+    return false;
+  }, body);
+}
+
 async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<boolean> {
+  if (await fillWechatBodyByPageScript(page, body)) return true;
+
   const pageBodySelectors = [
     "[contenteditable='true'][data-placeholder*='正文']",
     "[contenteditable='true'][aria-label*='正文']",
@@ -295,9 +411,7 @@ async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<bo
     "#js_editor [contenteditable='true']",
     ".editor [contenteditable='true']",
     ".ProseMirror",
-    ".ql-editor",
-    "#js_editor",
-    ".editor"
+    ".ql-editor"
   ];
 
   if (await fillFirstVisible(page, pageBodySelectors, body)) return true;
