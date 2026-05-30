@@ -46,14 +46,19 @@ function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: bo
   const pageEditorWrapper = createThrowingLocator();
   const accountNameRequired = createFakeLocator();
   const state = {
-    url: wechatLoginUrl
+    url: wechatLoginUrl,
+    closed: false
   };
   const navigations: string[] = [];
   return {
     title,
     body,
     navigations,
+    close() {
+      state.closed = true;
+    },
     goto(url: string) {
+      if (state.closed) return Promise.reject(new Error("Target page, context or browser has been closed"));
       navigations.push(url);
       if (url === wechatLoginUrl && options?.loggedIn) {
         state.url = "https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token=123456";
@@ -96,7 +101,7 @@ function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: bo
       };
     },
     isClosed() {
-      return false;
+      return state.closed;
     }
   };
 }
@@ -144,6 +149,30 @@ describe("wechat browser publisher", () => {
     expect(page.body.fillCalls).toContain("WeChat body");
     expect(result.status).toBe("NEEDS_USER_ACTION");
     expect(result.message).toContain("草稿已填入");
+  });
+
+  it("reopens a managed page when the remembered WeChat tab was closed", async () => {
+    const closedPage = createFakePage();
+    const loggedInPage = createFakePage({ loggedIn: true, pageEditorWrapper: true });
+    const pages = [closedPage, loggedInPage];
+    const publisher = createWechatBrowserPublisher({
+      openManagedPage: async () => pages.shift() ?? loggedInPage
+    });
+
+    await publisher.openLoginPage();
+    closedPage.close();
+
+    const result = await publisher.publish({
+      title: "WeChat title",
+      body: "WeChat body",
+      tags: ["AI"],
+      images: []
+    });
+
+    expect(loggedInPage.navigations).toContain(`${wechatArticleEditUrl}&action=edit&type=10&lang=zh_CN&token=123456`);
+    expect(loggedInPage.title.fillCalls).toContain("WeChat title");
+    expect(loggedInPage.body.fillCalls).toContain("WeChat body");
+    expect(result.status).toBe("NEEDS_USER_ACTION");
   });
 
   it("asks the user to log in again when the WeChat session has expired", async () => {

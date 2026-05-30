@@ -41,6 +41,7 @@ export interface WechatBrowserPublisher {
 
 export interface WechatBrowserPublisherOptions {
   openPage?: () => Promise<WechatBrowserPage>;
+  openManagedPage?: () => Promise<WechatBrowserPage>;
   executablePath?: string;
   profileDir?: string;
   headless?: boolean;
@@ -230,6 +231,7 @@ async function ensureManagedPage(browser: any): Promise<WechatBrowserPage> {
 
 async function ensurePersistentPage(options: WechatBrowserPublisherOptions): Promise<WechatBrowserPage> {
   if (options.openPage) return wrapPage(await options.openPage());
+  if (options.openManagedPage) return wrapPage(await options.openManagedPage());
 
   const { chromium } = await import("playwright-core");
   const executablePath = options.executablePath ?? process.env.CONTENTFLOW_CHROME_PATH ?? defaultChromePath;
@@ -623,6 +625,7 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
     if (persistentPage) {
       try {
         if (!persistentPage.isClosed()) return persistentPage;
+        resetPersistentPage();
       } catch {
         resetPersistentPage();
       }
