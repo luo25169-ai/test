@@ -15,6 +15,7 @@ const bilibiliBrowserPublisher = createBilibiliBrowserPublisher();
 const rednoteBrowserPublisher = createRednoteBrowserPublisher();
 const wechatBrowserPublisher = createWechatBrowserPublisher();
 const zhihuBrowserPublisher = createZhihuBrowserPublisher();
+const defaultPublishMode = process.env.PUBLISH_MODE === "mock" ? "mock" : "browser";
 
 const platformLoginUrls = {
   wechat: "https://mp.weixin.qq.com/",
@@ -51,7 +52,26 @@ const draftSchema = z.object({
   images: z.array(mediaFileSchema).default([])
 });
 
+const adaptedContentSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  summary: z.string(),
+  tags: z.array(z.string()).default([]),
+  images: z.array(mediaFileSchema).default([])
+});
+
+const adaptationResultSchema = z.object({
+  platformId: z.enum(["wechat", "zhihu", "bilibili", "rednote"]),
+  platform: z.string(),
+  content: adaptedContentSchema,
+  validation: z.object({
+    valid: z.boolean(),
+    issues: z.array(z.string()).default([])
+  })
+});
+
 const platformIdsSchema = z.array(z.enum(["wechat", "zhihu", "bilibili", "rednote"])).min(1);
+const publishModeSchema = z.enum(["browser", "mock"]);
 
 export const app = express();
 
@@ -60,6 +80,10 @@ app.use(express.json({ limit: "10mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "contentflow-server" });
+});
+
+app.get("/api/config", (_req, res) => {
+  res.json({ publishMode: defaultPublishMode });
 });
 
 app.get("/api/platforms", (_req, res) => {
@@ -194,13 +218,21 @@ app.post("/api/adapt", async (req, res, next) => {
 
 app.post("/api/publish", async (req, res, next) => {
   try {
-    const body = z.object({ draft: draftSchema, platformIds: platformIdsSchema }).parse(req.body);
+    const body = z
+      .object({
+        draft: draftSchema,
+        platformIds: platformIdsSchema,
+        adapted: z.array(adaptationResultSchema).optional(),
+        mode: publishModeSchema.optional()
+      })
+      .parse(req.body);
     res.status(201).json(
       await createPublishTask(body, {
         bilibiliPublisher: bilibiliBrowserPublisher,
         rednotePublisher: rednoteBrowserPublisher,
         wechatPublisher: wechatBrowserPublisher,
-        zhihuPublisher: zhihuBrowserPublisher
+        zhihuPublisher: zhihuBrowserPublisher,
+        publishMode: body.mode ?? defaultPublishMode
       })
     );
   } catch (error) {

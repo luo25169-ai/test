@@ -31,7 +31,7 @@ export interface AdaptationResult {
 
 export interface PublishTask {
   id: string;
-  status: "SUCCESS" | "FAILED" | "PARTIAL";
+  status: "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL";
   adapted: AdaptationResult[];
   results: Array<{
     platformId: string;
@@ -48,6 +48,14 @@ export interface PublishTask {
   createdAt: string;
 }
 
+export type PublishMode = "browser" | "mock";
+
+export async function fetchAppConfig() {
+  const response = await fetch("/api/config");
+  if (!response.ok) throw new Error("应用配置读取失败");
+  return (await response.json()) as { publishMode: PublishMode };
+}
+
 export async function adaptContent(draft: DraftContent, platformIds: string[], mode: "ai" | "rules" = "ai") {
   const response = await fetch("/api/adapt", {
     method: "POST",
@@ -58,14 +66,20 @@ export async function adaptContent(draft: DraftContent, platformIds: string[], m
   return (await response.json()) as { items: AdaptationResult[]; mode: "ai" | "rules"; aiError?: string };
 }
 
-export async function publishContent(draft: DraftContent, platformIds: string[]) {
+export async function publishContent(draft: DraftContent, platformIds: string[], adapted?: AdaptationResult[], mode?: PublishMode) {
   const response = await fetch("/api/publish", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ draft, platformIds })
+    body: JSON.stringify({ draft, platformIds, adapted, mode })
   });
   if (!response.ok) throw new Error("发布任务创建失败");
   return (await response.json()) as PublishTask;
+}
+
+export async function fetchPublishTasks() {
+  const response = await fetch("/api/tasks");
+  if (!response.ok) throw new Error("发布任务刷新失败");
+  return (await response.json()) as PublishTask[];
 }
 
 export async function openPlatformLogin(platformId: string) {

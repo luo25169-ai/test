@@ -15,8 +15,8 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { AdaptationResult, DraftContent, PublishTask } from "./api";
-import { adaptContent, checkPlatformLogin, openPlatformLogin, publishContent } from "./api";
+import type { AdaptationResult, DraftContent, PublishMode, PublishTask } from "./api";
+import { adaptContent, checkPlatformLogin, fetchAppConfig, fetchPublishTasks, openPlatformLogin, publishContent } from "./api";
 
 type View = "dashboard" | "editor" | "accounts" | "tasks" | "history";
 type AccountStatus = "CONNECTED" | "NEEDS_LOGIN";
@@ -41,6 +41,7 @@ function classNames(...items: Array<string | false | undefined>) {
 }
 
 function resultStatusClass(status: string) {
+  if (status === "PENDING") return "text-slate-500";
   if (status === "SUCCESS") return "text-emerald-700";
   if (status === "NEEDS_USER_ACTION") return "text-amber-700";
   return "text-red-700";
@@ -48,6 +49,7 @@ function resultStatusClass(status: string) {
 
 const accountStatusesStorageKey = "contentflow.accountStatuses";
 const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
+const publishModeStorageKey = "contentflow.publishMode";
 
 const defaultAccountStatuses: Record<string, AccountStatus> = {
   wechat: "NEEDS_LOGIN",
@@ -79,6 +81,15 @@ function readStoredLoginOpenedPlatforms(): string[] {
   }
 }
 
+function readStoredPublishMode(): PublishMode | null {
+  try {
+    const raw = localStorage.getItem(publishModeStorageKey);
+    return raw === "mock" || raw === "browser" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [draft, setDraft] = useState<DraftContent>(initialDraft);
@@ -94,11 +105,13 @@ export default function App() {
   const [accountStatuses, setAccountStatuses] = useState<Record<string, AccountStatus>>(readStoredAccountStatuses);
   const [loginOpenedPlatforms, setLoginOpenedPlatforms] = useState<string[]>(readStoredLoginOpenedPlatforms);
   const [pendingPublishPlatform, setPendingPublishPlatform] = useState<string | null>(null);
+  const [publishMode, setPublishMode] = useState<PublishMode>(readStoredPublishMode() ?? "browser");
 
   const activeContent = useMemo(
     () => adapted.find((item) => item.platformId === activePreview) ?? adapted[0],
     [activePreview, adapted]
   );
+  const hasRunningTasks = useMemo(() => tasks.some((task) => task.status === "RUNNING"), [tasks]);
 
   useEffect(() => {
     localStorage.setItem(accountStatusesStorageKey, JSON.stringify(accountStatuses));
@@ -107,6 +120,32 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(loginOpenedPlatformsStorageKey, JSON.stringify(loginOpenedPlatforms));
   }, [loginOpenedPlatforms]);
+
+  useEffect(() => {
+    const storedMode = readStoredPublishMode();
+    if (storedMode) return;
+    fetchAppConfig()
+      .then((config) => setPublishMode(config.publishMode))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(publishModeStorageKey, publishMode);
+  }, [publishMode]);
+
+  useEffect(() => {
+    if (!hasRunningTasks) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const nextTasks = await fetchPublishTasks();
+        setTasks(nextTasks);
+        updateAccountStatusesFromTasks(nextTasks);
+      } catch {
+        // Keep the current in-memory tasks if a polling tick fails.
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [hasRunningTasks]);
 
   async function handleAdapt() {
     setError("");
@@ -157,24 +196,31 @@ export default function App() {
     setError("");
     setLoading(`publish:${platformIds.join(",")}`);
     try {
-      const task = await publishContent(draft, platformIds);
+      const adaptedForPublish = await ensureAdaptedFor(platformIds);
+      const task = await publishContent(draft, platformIds, adaptedForPublish, publishMode);
       setTasks((current) => [task, ...current]);
       setAdapted(task.adapted);
       setPendingPublishPlatform(null);
-      setAccountStatuses((current) => {
-        const next = { ...current };
-        for (const result of task.results) {
-          if (result.status === "NEEDS_LOGIN") next[result.platformId] = "NEEDS_LOGIN";
-          if (result.status === "SUCCESS" || result.status === "NEEDS_USER_ACTION") next[result.platformId] = "CONNECTED";
-        }
-        return next;
-      });
+      updateAccountStatusesFromTasks([task]);
       setView(nextView);
     } catch (err) {
       setError(err instanceof Error ? err.message : "发布失败");
     } finally {
       setLoading(null);
     }
+  }
+
+  function updateAccountStatusesFromTasks(nextTasks: PublishTask[]) {
+    setAccountStatuses((current) => {
+      const next = { ...current };
+      for (const task of nextTasks) {
+        for (const result of task.results) {
+          if (result.status === "NEEDS_LOGIN") next[result.platformId] = "NEEDS_LOGIN";
+          if (result.status === "SUCCESS" || result.status === "NEEDS_USER_ACTION") next[result.platformId] = "CONNECTED";
+        }
+      }
+      return next;
+    });
   }
 
   async function handleOpenLogin(platformId: string, platformName: string) {
@@ -264,14 +310,37 @@ export default function App() {
             <h1 className="text-2xl font-semibold">创作者发布工作台</h1>
             <p className="text-sm text-muted">一份内容，多平台适配，发布过程可追踪。</p>
           </div>
-          <button
-            onClick={() => setView("accounts")}
-            disabled={loading !== null}
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-          >
-            <Send size={16} />
-            一键发布
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2">
+              <span className="text-sm font-medium text-slate-600">发布模式</span>
+              <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1 text-sm">
+                {[
+                  ["mock", "演示模式"],
+                  ["browser", "真实发布"]
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPublishMode(mode as PublishMode)}
+                    className={classNames(
+                      "h-8 min-w-20 rounded px-3 font-medium transition",
+                      publishMode === mode ? "bg-ink text-white shadow-sm" : "text-slate-600 hover:text-ink"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => setView("accounts")}
+              disabled={loading !== null}
+              className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              <Send size={16} />
+              一键发布
+            </button>
+          </div>
         </header>
 
         {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -302,12 +371,34 @@ export default function App() {
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-3 text-sm">
-                {["写入原始内容", "生成平台版本", "执行真实发布器", "查看日志结果"].map((item, index) => (
+                {["写入原始内容", "生成平台版本", publishMode === "mock" ? "演示模拟发布" : "执行真实发布器", "查看日志结果"].map((item, index) => (
                   <div key={item} className="rounded-md bg-slate-50 p-4">
                     <div className="mb-2 text-xs text-muted">Step {index + 1}</div>
                     <div className="font-medium">{item}</div>
                   </div>
                 ))}
+              </div>
+              <div className="mt-5 border-t border-line pt-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold">平台扩展架构</h3>
+                    <p className="text-sm text-muted">新增平台沿用同一套适配、发布和日志链路。</p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">可扩展设计</span>
+                </div>
+                <div className="grid grid-cols-4 gap-3 text-sm">
+                  {[
+                    ["统一适配器接口", "formatContent / validate / publish"],
+                    ["平台注册中心", "platformRegistry 管理平台能力"],
+                    ["发布执行器", "BrowserExecutor + MockExecutor"],
+                    ["任务日志追踪", "独立记录状态、错误和结果"]
+                  ].map(([title, detail]) => (
+                    <div key={title} className="rounded-md border border-line bg-white p-4">
+                      <div className="mb-2 font-medium">{title}</div>
+                      <div className="text-xs leading-5 text-muted">{detail}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
@@ -426,59 +517,64 @@ export default function App() {
 
         {view === "accounts" && (
           <section className="grid grid-cols-2 gap-4">
-            {platforms.map((platform) => (
-              <div key={platform.id} className="rounded-lg border border-line bg-white p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold">{platform.name}</h2>
-                    <p className="text-sm text-muted">
-                      {platform.tone} · {accountStatuses[platform.id] === "CONNECTED" ? "可直接发布" : "需要先登录"}
-                    </p>
-                  </div>
-                  <span
-                    className={classNames(
-                      "rounded-full px-3 py-1 text-xs",
-                      accountStatuses[platform.id] === "CONNECTED"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-amber-100 text-amber-700"
-                    )}
-                  >
-                    {accountStatuses[platform.id] === "CONNECTED" ? "CONNECTED" : "LOGIN REQUIRED"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {accountStatuses[platform.id] === "CONNECTED" ? (
-                    <button
-                      onClick={() => requestPublishPreview(platform.id)}
-                      disabled={loading !== null}
-                      className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
-                    >
-                      {loading === `preview:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                      发布到{platform.name}
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => handleOpenLogin(platform.id, platform.name)}
-                        className="rounded-md border border-line px-3 py-2 text-sm"
-                      >
-                        {loginOpenedPlatforms.includes(platform.id) ? "重新打开登录页" : "打开平台登录页"}
-                      </button>
-                      {loginOpenedPlatforms.includes(platform.id) && (
-                        <button
-                          onClick={() => handleConfirmLogin(platform.id, platform.name)}
-                          disabled={loading === `login-check:${platform.id}`}
-                          className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
-                        >
-                          {loading === `login-check:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
-                          我已完成登录
-                        </button>
+            {platforms.map((platform) => {
+              const canPublish = publishMode === "mock" || accountStatuses[platform.id] === "CONNECTED";
+              return (
+                <div key={platform.id} className="rounded-lg border border-line bg-white p-5">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="font-semibold">{platform.name}</h2>
+                      <p className="text-sm text-muted">
+                        {platform.tone} · {publishMode === "mock" ? "演示模式可直接发布" : accountStatuses[platform.id] === "CONNECTED" ? "可直接发布" : "需要先登录"}
+                      </p>
+                    </div>
+                    <span
+                      className={classNames(
+                        "rounded-full px-3 py-1 text-xs",
+                        publishMode === "mock"
+                          ? "bg-sky-100 text-sky-700"
+                          : accountStatuses[platform.id] === "CONNECTED"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-amber-100 text-amber-700"
                       )}
-                    </>
-                  )}
+                    >
+                      {publishMode === "mock" ? "DEMO READY" : accountStatuses[platform.id] === "CONNECTED" ? "CONNECTED" : "LOGIN REQUIRED"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {canPublish ? (
+                      <button
+                        onClick={() => requestPublishPreview(platform.id)}
+                        disabled={loading !== null}
+                        className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
+                      >
+                        {loading === `preview:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                        发布到{platform.name}
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => handleOpenLogin(platform.id, platform.name)}
+                          className="rounded-md border border-line px-3 py-2 text-sm"
+                        >
+                          {loginOpenedPlatforms.includes(platform.id) ? "重新打开登录页" : "打开平台登录页"}
+                        </button>
+                        {loginOpenedPlatforms.includes(platform.id) && (
+                          <button
+                            onClick={() => handleConfirmLogin(platform.id, platform.name)}
+                            disabled={loading === `login-check:${platform.id}`}
+                            className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:opacity-60"
+                          >
+                            {loading === `login-check:${platform.id}` ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+                            我已完成登录
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </section>
         )}
 
@@ -529,7 +625,9 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div>
                 <h2 className="text-lg font-semibold">确认发布到{pendingPreview.platform}</h2>
-                <p className="text-sm text-muted">确认后将跳转发布任务页并执行发布流程。</p>
+            <p className="text-sm text-muted">
+              {publishMode === "mock" ? "确认后将使用演示模式生成成功结果，不打开真实平台页面。" : "确认后将跳转发布任务页并执行发布流程。"}
+            </p>
               </div>
               <button
                 onClick={() => setPendingPublishPlatform(null)}

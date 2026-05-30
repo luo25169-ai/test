@@ -31,7 +31,7 @@ export interface ValidationResult {
   issues: string[];
 }
 
-export type PublishStatus = "SUCCESS" | "FAILED" | "NEEDS_LOGIN" | "NEEDS_USER_ACTION";
+export type PublishStatus = "PENDING" | "SUCCESS" | "FAILED" | "NEEDS_LOGIN" | "NEEDS_USER_ACTION";
 
 export interface PublishContext {
   taskId: string;
