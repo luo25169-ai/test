@@ -234,10 +234,18 @@ async function findFirstVisibleText(page: WechatBrowserPage, texts: string[]): P
 }
 
 async function fillFirstVisible(root: { locator(selector: string): BrowserLocator }, selectors: string[], value: string): Promise<boolean> {
-  const locator = await findFirstVisibleLocator(root, selectors);
-  if (!locator) return false;
-  await locator.fill(value);
-  return true;
+  for (const selector of selectors) {
+    const locator = root.locator(selector);
+    if ((await locator.count()) === 0 || !(await locator.first().isVisible())) continue;
+    try {
+      await locator.first().fill(value);
+      return true;
+    } catch {
+      // Some WeChat editor containers are visible wrappers rather than real inputs.
+      // Keep probing more specific editable nodes instead of failing the whole task.
+    }
+  }
+  return false;
 }
 
 async function fillFirstVisiblePlaceholder(page: WechatBrowserPage, placeholders: string[], value: string): Promise<boolean> {
@@ -280,23 +288,33 @@ async function isWechatAccountProfileBlockingEditor(page: WechatBrowserPage): Pr
 }
 
 async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<boolean> {
-  const bodySelectors = [
-    "#ueditor_0 body",
-    "body[contenteditable='true']",
-    "body",
-    "[contenteditable='true']",
+  const pageBodySelectors = [
+    "[contenteditable='true'][data-placeholder*='正文']",
+    "[contenteditable='true'][aria-label*='正文']",
+    "[contenteditable='true'][placeholder*='正文']",
+    "#js_editor [contenteditable='true']",
+    ".editor [contenteditable='true']",
     ".ProseMirror",
     ".ql-editor",
     "#js_editor",
     ".editor"
   ];
 
-  if (await fillFirstVisible(page, bodySelectors, body)) return true;
+  if (await fillFirstVisible(page, pageBodySelectors, body)) return true;
 
   if (!page.frameLocator) return false;
+  const frameBodySelectors = [
+    "body[contenteditable='true']",
+    "[contenteditable='true']",
+    ".ProseMirror",
+    ".ql-editor",
+    "#js_editor",
+    ".editor",
+    "body"
+  ];
   for (const frameSelector of ["iframe#ueditor_0", "iframe[id*='ueditor']", "iframe[id*='editor']", "iframe"]) {
     const frame = page.frameLocator(frameSelector);
-    if (await fillFirstVisible(frame, bodySelectors, body)) return true;
+    if (await fillFirstVisible(frame, frameBodySelectors, body)) return true;
   }
   return false;
 }

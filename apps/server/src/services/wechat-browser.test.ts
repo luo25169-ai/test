@@ -29,10 +29,21 @@ function createHiddenLocator() {
   return createFakeLocator(false);
 }
 
-function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: boolean }) {
+function createThrowingLocator() {
+  const locator = createFakeLocator();
+  return {
+    ...locator,
+    fill() {
+      return Promise.reject(new Error("not editable"));
+    }
+  };
+}
+
+function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: boolean; pageEditorWrapper?: boolean }) {
   const title = createFakeLocator();
   const body = createFakeLocator();
   const hidden = createHiddenLocator();
+  const pageEditorWrapper = createThrowingLocator();
   const accountNameRequired = createFakeLocator();
   const state = {
     url: wechatLoginUrl
@@ -59,6 +70,7 @@ function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: bo
     },
     locator(selector: string) {
       if (selector.includes("activity-name") || selector.includes("title") || selector.includes("标题")) return title;
+      if (options?.pageEditorWrapper && selector === "#js_editor") return pageEditorWrapper;
       return hidden;
     },
     getByPlaceholder() {
@@ -115,7 +127,7 @@ describe("wechat browser publisher", () => {
   });
 
   it("fills the WeChat editor draft and stops before publishing", async () => {
-    const page = createFakePage({ loggedIn: true });
+    const page = createFakePage({ loggedIn: true, pageEditorWrapper: true });
     const publisher = createWechatBrowserPublisher({
       openPage: async () => page
     });
