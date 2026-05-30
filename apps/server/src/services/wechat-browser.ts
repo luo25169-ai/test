@@ -21,6 +21,12 @@ export interface BrowserFrameLocator {
 export interface WechatBrowserPage extends BrowserPage {
   frameLocator?(selector: string): BrowserFrameLocator;
   evaluate?<T>(pageFunction: (arg: string) => T, arg: string): Promise<T>;
+  keyboard?: BrowserPage["keyboard"] & {
+    insertText?(text: string): Promise<void>;
+  };
+  mouse?: {
+    click(x: number, y: number): Promise<void>;
+  };
 }
 
 export interface WechatBrowserPublisher {
@@ -109,6 +115,31 @@ function wrapPage(page: any): WechatBrowserPage {
     frameLocator:
       typeof page.frameLocator === "function"
         ? (selector: string) => wrapFrameLocator(page.frameLocator(selector))
+        : undefined,
+    keyboard:
+      page.keyboard && typeof page.keyboard.type === "function"
+        ? {
+            async type(text: string) {
+              await page.keyboard.type(text);
+            },
+            async press(key: string) {
+              await page.keyboard.press(key);
+            },
+            insertText:
+              typeof page.keyboard.insertText === "function"
+                ? async (text: string) => {
+                    await page.keyboard.insertText(text);
+                  }
+                : undefined
+          }
+        : undefined,
+    mouse:
+      page.mouse && typeof page.mouse.click === "function"
+        ? {
+            async click(x: number, y: number) {
+              await page.mouse.click(x, y);
+            }
+          }
         : undefined,
     isClosed() {
       return typeof page.isClosed === "function" ? page.isClosed() : false;
@@ -287,6 +318,59 @@ async function isWechatAccountProfileBlockingEditor(page: WechatBrowserPage): Pr
   return (await findFirstVisibleText(page, ["当前公众号名称", "请尽快修改名称", "修改名称"])) !== null;
 }
 
+async function fillWechatBodyByRealInput(page: WechatBrowserPage, body: string): Promise<boolean> {
+  if (!page.evaluate || !page.mouse || !page.keyboard) return false;
+  const target = await page.evaluate((unused) => {
+    void unused;
+    const doc = (globalThis as any).document;
+    const win = globalThis as any;
+    const titleSelectors = [
+      "#title",
+      "#activity-name",
+      "#js_title",
+      "#js_title_area",
+      "input[name='title']",
+      "textarea[name='title']",
+      "[placeholder*='标题']",
+      "[data-placeholder*='标题']",
+      "[aria-label*='标题']",
+      "[class*='title']",
+      "[id*='title']"
+    ];
+    const isVisible = (element: any) => {
+      const rect = element.getBoundingClientRect();
+      const style = win.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const isTitleLike = (element: any) => titleSelectors.some((selector) => element.matches?.(selector) || element.closest?.(selector));
+    const candidates = Array.from(doc.querySelectorAll(".ProseMirror[contenteditable='true'], [contenteditable='true']"))
+      .filter((element: any) => isVisible(element) && !isTitleLike(element))
+      .map((element: any) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          text: String(element.innerText || element.textContent || "").trim(),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        };
+      });
+    return candidates.find((item: any) => item.text.includes("从这里开始写正文")) ?? candidates.sort((a: any, b: any) => b.height - a.height)[0] ?? null;
+  }, "");
+  if (!target || target.width <= 0 || target.height <= 0) return false;
+
+  const clickX = Math.round(target.x + Math.min(target.width / 2, 260));
+  const clickY = Math.round(target.y + Math.min(target.height / 2, 60));
+  await page.mouse.click(clickX, clickY);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (page.keyboard.insertText) {
+    await page.keyboard.insertText(body);
+  } else {
+    await page.keyboard.type(body);
+  }
+  return true;
+}
+
 async function fillWechatBodyByPageScript(page: WechatBrowserPage, body: string): Promise<boolean> {
   if (!page.evaluate) return false;
   return page.evaluate((rawBody) => {
@@ -402,6 +486,7 @@ async function fillWechatBodyByPageScript(page: WechatBrowserPage, body: string)
 }
 
 async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<boolean> {
+  if (await fillWechatBodyByRealInput(page, body)) return true;
   if (await fillWechatBodyByPageScript(page, body)) return true;
 
   const pageBodySelectors = [
