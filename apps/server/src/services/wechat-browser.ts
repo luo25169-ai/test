@@ -21,6 +21,7 @@ export interface BrowserFrameLocator {
 export interface WechatBrowserPage extends BrowserPage {
   frameLocator?(selector: string): BrowserFrameLocator;
   evaluate?<T>(pageFunction: (arg: string) => T, arg: string): Promise<T>;
+  evaluateExpression?<T>(expression: string): Promise<T>;
   keyboard?: BrowserPage["keyboard"] & {
     insertText?(text: string): Promise<void>;
   };
@@ -152,6 +153,10 @@ function wrapPage(page: any): WechatBrowserPage {
     evaluate:
       typeof page.evaluate === "function"
         ? async <T>(pageFunction: (arg: string) => T, arg: string) => page.evaluate(pageFunction, arg)
+        : undefined,
+    evaluateExpression:
+      typeof page.evaluate === "function"
+        ? async <T>(expression: string) => page.evaluate(expression)
         : undefined
   };
 }
@@ -319,11 +324,14 @@ async function isWechatAccountProfileBlockingEditor(page: WechatBrowserPage): Pr
 }
 
 async function fillWechatBodyByRealInput(page: WechatBrowserPage, body: string): Promise<boolean> {
-  if (!page.evaluate || !page.mouse || !page.keyboard) return false;
-  const target = await page.evaluate((unused) => {
-    void unused;
-    const doc = (globalThis as any).document;
-    const win = globalThis as any;
+  if (!page.evaluateExpression || !page.mouse || !page.keyboard) return false;
+  const target = await page.evaluateExpression<{
+    text: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(`(() => {
     const titleSelectors = [
       "#title",
       "#activity-name",
@@ -337,15 +345,15 @@ async function fillWechatBodyByRealInput(page: WechatBrowserPage, body: string):
       "[class*='title']",
       "[id*='title']"
     ];
-    const isVisible = (element: any) => {
+    const isVisible = (element) => {
       const rect = element.getBoundingClientRect();
-      const style = win.getComputedStyle(element);
+      const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
     };
-    const isTitleLike = (element: any) => titleSelectors.some((selector) => element.matches?.(selector) || element.closest?.(selector));
-    const candidates = Array.from(doc.querySelectorAll(".ProseMirror[contenteditable='true'], [contenteditable='true']"))
-      .filter((element: any) => isVisible(element) && !isTitleLike(element))
-      .map((element: any) => {
+    const isTitleLike = (element) => titleSelectors.some((selector) => element.matches?.(selector) || element.closest?.(selector));
+    const candidates = Array.from(document.querySelectorAll(".ProseMirror[contenteditable='true'], [contenteditable='true']"))
+      .filter((element) => isVisible(element) && !isTitleLike(element))
+      .map((element) => {
         const rect = element.getBoundingClientRect();
         return {
           text: String(element.innerText || element.textContent || "").trim(),
@@ -355,8 +363,8 @@ async function fillWechatBodyByRealInput(page: WechatBrowserPage, body: string):
           height: rect.height
         };
       });
-    return candidates.find((item: any) => item.text.includes("从这里开始写正文")) ?? candidates.sort((a: any, b: any) => b.height - a.height)[0] ?? null;
-  }, "");
+    return candidates.find((item) => item.text.includes("从这里开始写正文")) ?? candidates.sort((a, b) => b.height - a.height)[0] ?? null;
+  })()`);
   if (!target || target.width <= 0 || target.height <= 0) return false;
 
   const clickX = Math.round(target.x + Math.min(target.width / 2, 260));
