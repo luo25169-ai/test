@@ -16,8 +16,8 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { AdaptationResult, DraftContent, PublishMode, PublishTask } from "./api";
-import { adaptContent, checkPlatformLogin, fetchAppConfig, fetchPublishTasks, openPlatformLogin, publishContent } from "./api";
+import type { AdaptationResult, DraftContent, PublishTask } from "./api";
+import { adaptContent, checkPlatformLogin, fetchPublishTasks, openPlatformLogin, publishContent } from "./api";
 
 type View = "dashboard" | "editor" | "accounts" | "tasks" | "history";
 type AccountStatus = "CONNECTED" | "NEEDS_LOGIN";
@@ -79,7 +79,6 @@ function adaptationReport(draft: DraftContent, item: AdaptationResult) {
 
 const accountStatusesStorageKey = "contentflow.accountStatuses";
 const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
-const publishModeStorageKey = "contentflow.publishMode";
 
 const defaultAccountStatuses: Record<string, AccountStatus> = {
   wechat: "NEEDS_LOGIN",
@@ -111,15 +110,6 @@ function readStoredLoginOpenedPlatforms(): string[] {
   }
 }
 
-function readStoredPublishMode(): PublishMode | null {
-  try {
-    const raw = localStorage.getItem(publishModeStorageKey);
-    return raw === "mock" || raw === "browser" ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [draft, setDraft] = useState<DraftContent>(initialDraft);
@@ -135,7 +125,6 @@ export default function App() {
   const [accountStatuses, setAccountStatuses] = useState<Record<string, AccountStatus>>(readStoredAccountStatuses);
   const [loginOpenedPlatforms, setLoginOpenedPlatforms] = useState<string[]>(readStoredLoginOpenedPlatforms);
   const [pendingPublishPlatform, setPendingPublishPlatform] = useState<string | null>(null);
-  const [publishMode, setPublishMode] = useState<PublishMode>(readStoredPublishMode() ?? "browser");
 
   const activeContent = useMemo(
     () => adapted.find((item) => item.platformId === activePreview) ?? adapted[0],
@@ -150,18 +139,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(loginOpenedPlatformsStorageKey, JSON.stringify(loginOpenedPlatforms));
   }, [loginOpenedPlatforms]);
-
-  useEffect(() => {
-    const storedMode = readStoredPublishMode();
-    if (storedMode) return;
-    fetchAppConfig()
-      .then((config) => setPublishMode(config.publishMode))
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(publishModeStorageKey, publishMode);
-  }, [publishMode]);
 
   useEffect(() => {
     if (!hasRunningTasks) return;
@@ -227,7 +204,7 @@ export default function App() {
     setLoading(`publish:${platformIds.join(",")}`);
     try {
       const adaptedForPublish = await ensureAdaptedFor(platformIds);
-      const task = await publishContent(draft, platformIds, adaptedForPublish, publishMode);
+      const task = await publishContent(draft, platformIds, adaptedForPublish, "browser");
       setTasks((current) => [task, ...current]);
       setAdapted(task.adapted);
       setPendingPublishPlatform(null);
@@ -323,18 +300,16 @@ export default function App() {
     ? [
         ["内容适配", "已生成平台版本", true],
         ["平台校验", pendingPreview.validation.valid ? "校验通过" : pendingPreview.validation.issues.join("；"), pendingPreview.validation.valid],
-        ["账号状态", publishMode === "mock" ? "演示模式免登录" : pendingAccountReady ? "已连接账号" : "需要登录", publishMode === "mock" || pendingAccountReady],
-        ["发布模式", publishMode === "mock" ? "演示模式" : "真实发布", true],
+        ["账号状态", pendingAccountReady ? "已连接账号" : "需要登录", pendingAccountReady],
+        ["发布模式", "真实发布", true],
         [
           "预计结果",
           !pendingPreview.validation.valid
             ? "需要先调整内容"
-            : publishMode === "mock"
-            ? "稳定模拟成功"
             : pendingAccountReady
             ? "进入真实发布流程"
             : "需要先完成登录",
-          pendingPreview.validation.valid && (publishMode === "mock" || pendingAccountReady)
+          pendingPreview.validation.valid && pendingAccountReady
         ]
       ]
     : [];
@@ -381,27 +356,6 @@ export default function App() {
             <p className="text-sm text-muted">一份内容，多平台适配，发布过程可追踪。</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2">
-              <span className="text-sm font-medium text-slate-600">发布模式</span>
-              <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1 text-sm">
-                {[
-                  ["mock", "演示模式"],
-                  ["browser", "真实发布"]
-                ].map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setPublishMode(mode as PublishMode)}
-                    className={classNames(
-                      "h-8 min-w-20 rounded px-3 font-medium transition",
-                      publishMode === mode ? "bg-ink text-white shadow-sm" : "text-slate-600 hover:text-ink"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
             <button
               onClick={() => setView("accounts")}
               disabled={loading !== null}
@@ -441,7 +395,7 @@ export default function App() {
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-3 text-sm">
-                {["写入原始内容", "生成平台版本", publishMode === "mock" ? "演示模拟发布" : "执行真实发布器", "查看日志结果"].map((item, index) => (
+                {["写入原始内容", "生成平台版本", "执行真实发布器", "查看日志结果"].map((item, index) => (
                   <div key={item} className="rounded-md bg-slate-50 p-4">
                     <div className="mb-2 text-xs text-muted">Step {index + 1}</div>
                     <div className="font-medium">{item}</div>
@@ -606,27 +560,25 @@ export default function App() {
         {view === "accounts" && (
           <section className="grid grid-cols-2 gap-4">
             {platforms.map((platform) => {
-              const canPublish = publishMode === "mock" || accountStatuses[platform.id] === "CONNECTED";
+              const canPublish = accountStatuses[platform.id] === "CONNECTED";
               return (
                 <div key={platform.id} className="rounded-lg border border-line bg-white p-5">
                   <div className="mb-3 flex items-center justify-between">
                     <div>
                       <h2 className="font-semibold">{platform.name}</h2>
                       <p className="text-sm text-muted">
-                        {platform.tone} · {publishMode === "mock" ? "演示模式可直接发布" : accountStatuses[platform.id] === "CONNECTED" ? "可直接发布" : "需要先登录"}
+                        {platform.tone} · {accountStatuses[platform.id] === "CONNECTED" ? "可直接发布" : "需要先登录"}
                       </p>
                     </div>
                     <span
                       className={classNames(
                         "rounded-full px-3 py-1 text-xs",
-                        publishMode === "mock"
-                          ? "bg-sky-100 text-sky-700"
-                          : accountStatuses[platform.id] === "CONNECTED"
+                        accountStatuses[platform.id] === "CONNECTED"
                           ? "bg-emerald-100 text-emerald-700"
                           : "bg-amber-100 text-amber-700"
                       )}
                     >
-                      {publishMode === "mock" ? "DEMO READY" : accountStatuses[platform.id] === "CONNECTED" ? "CONNECTED" : "LOGIN REQUIRED"}
+                      {accountStatuses[platform.id] === "CONNECTED" ? "CONNECTED" : "LOGIN REQUIRED"}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -726,7 +678,7 @@ export default function App() {
               <div>
                 <h2 className="text-lg font-semibold">确认发布到{pendingPreview.platform}</h2>
             <p className="text-sm text-muted">
-              {publishMode === "mock" ? "确认后将使用演示模式生成成功结果，不打开真实平台页面。" : "确认后将跳转发布任务页并执行发布流程。"}
+              确认后将跳转发布任务页并执行发布流程。
             </p>
               </div>
               <button
@@ -752,7 +704,7 @@ export default function App() {
                   <ShieldCheck size={16} className="text-slate-500" />
                   <div>
                     <h3 className="text-sm font-semibold">发布前智能体检</h3>
-                    <p className="text-xs text-muted">确认内容、账号和发布模式都已准备好。</p>
+                    <p className="text-xs text-muted">确认内容、账号和真实发布流程都已准备好。</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
