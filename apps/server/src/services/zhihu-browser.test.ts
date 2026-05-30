@@ -100,7 +100,7 @@ describe("zhihu browser publisher", () => {
     expect(page.navigations).toContain(zhihuLoginUrl);
   });
 
-  it("fills the Zhihu editor and clicks publish", async () => {
+  it("fills the Zhihu editor and stops before final publishing", async () => {
     const page = createFakePage();
     const publisher = createZhihuBrowserPublisher({
       openPage: async () => page
@@ -116,8 +116,10 @@ describe("zhihu browser publisher", () => {
     expect(page.navigations).toContain(zhihuArticleWriteUrl);
     expect(page.title.fillCalls).toContain("知乎文章标题");
     expect(page.body.fillCalls).toContain("这是知乎文章正文。");
-    expect(page.publish.clickCalls).toBeGreaterThan(0);
-    expect(result.status).toBe("SUCCESS");
+    expect(page.publish.clickCalls).toBe(0);
+    expect(page.confirm.clickCalls).toBe(0);
+    expect(result.status).toBe("NEEDS_USER_ACTION");
+    expect(result.message).toContain("手动点击发布");
   });
 
   it("supports a Zhihu editor title that is only exposed as contenteditable", async () => {
@@ -180,6 +182,8 @@ describe("zhihu browser publisher", () => {
 
     expect(title.fillCalls).toContain("知乎文章标题");
     expect(body.fillCalls).toContain("这是知乎文章正文。");
-    expect(result.status).toBe("SUCCESS");
+    expect(publish.clickCalls).toBe(0);
+    expect(confirm.clickCalls).toBe(0);
+    expect(result.status).toBe("NEEDS_USER_ACTION");
   });
 });

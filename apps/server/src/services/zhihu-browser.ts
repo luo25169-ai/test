@@ -435,18 +435,9 @@ export function createZhihuBrowserPublisher(options: ZhihuBrowserPublisherOption
         };
       }
 
-      const clickedPublish = await clickButton(page, ["发布", "发表"]);
-      if (!clickedPublish) {
-        return {
-          status: "NEEDS_USER_ACTION",
-          message: "没有找到知乎发布按钮"
-        };
-      }
-
-      await clickButton(page, ["确认发布", "确定"]);
       return {
-        status: "SUCCESS",
-        message: "知乎文章已提交发布",
+        status: "NEEDS_USER_ACTION",
+        message: "知乎文章标题和正文已填入，请确认内容后手动点击发布",
         publishedUrl: page.url()
       };
     }
