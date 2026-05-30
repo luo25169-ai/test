@@ -20,6 +20,7 @@ export interface BrowserFrameLocator {
 
 export interface WechatBrowserPage extends BrowserPage {
   frameLocator?(selector: string): BrowserFrameLocator;
+  evaluate?<T>(pageFunction: (arg: string) => T, arg: string): Promise<T>;
 }
 
 export interface WechatBrowserPublisher {
@@ -116,7 +117,11 @@ function wrapPage(page: any): WechatBrowserPage {
       if (typeof page.bringToFront === "function") {
         await page.bringToFront();
       }
-    }
+    },
+    evaluate:
+      typeof page.evaluate === "function"
+        ? async <T>(pageFunction: (arg: string) => T, arg: string) => page.evaluate(pageFunction, arg)
+        : undefined
   };
 }
 
@@ -235,6 +240,17 @@ async function fillFirstVisible(root: { locator(selector: string): BrowserLocato
   return true;
 }
 
+async function fillFirstVisiblePlaceholder(page: WechatBrowserPage, placeholders: string[], value: string): Promise<boolean> {
+  for (const placeholder of placeholders) {
+    const locator = page.getByPlaceholder(placeholder, { exact: false });
+    if ((await locator.count()) > 0 && (await locator.first().isVisible())) {
+      await locator.first().fill(value);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function isWechatLoginRequired(page: WechatBrowserPage): Promise<boolean> {
   const currentUrl = page.url();
   if (currentUrl.includes("/cgi-bin/loginpage") || currentUrl.includes("login")) return true;
@@ -283,6 +299,92 @@ async function fillWechatBody(page: WechatBrowserPage, body: string): Promise<bo
     if (await fillFirstVisible(frame, bodySelectors, body)) return true;
   }
   return false;
+}
+
+async function fillWechatTitle(page: WechatBrowserPage, title: string): Promise<boolean> {
+  const titleSelectors = [
+    "#title",
+    "#activity-name",
+    "#js_title",
+    "#js_title_area",
+    "input[name='title']",
+    "textarea[name='title']",
+    "input[placeholder*='标题']",
+    "textarea[placeholder*='标题']",
+    "[placeholder*='标题']",
+    "[data-placeholder*='标题']",
+    "[aria-label*='标题']",
+    "[contenteditable='true'][data-placeholder*='标题']",
+    "[contenteditable='true'][aria-label*='标题']",
+    "[class*='title'] input",
+    "[class*='title'] textarea",
+    "[class*='title'][contenteditable='true']",
+    "[id*='title'] input",
+    "[id*='title'] textarea",
+    "[id*='title'][contenteditable='true']"
+  ];
+
+  if (await fillFirstVisible(page, titleSelectors, title)) return true;
+  if (await fillFirstVisiblePlaceholder(page, ["请在这里输入标题", "请输入标题", "填写标题", "标题"], title)) return true;
+
+  if (!page.evaluate) return false;
+  return page.evaluate((rawTitle) => {
+    const doc = (globalThis as any).document;
+    const win = globalThis as any;
+    const selectors = [
+      "#title",
+      "#activity-name",
+      "#js_title",
+      "#js_title_area",
+      "input[name='title']",
+      "textarea[name='title']",
+      "input[placeholder*='标题']",
+      "textarea[placeholder*='标题']",
+      "[placeholder*='标题']",
+      "[data-placeholder*='标题']",
+      "[aria-label*='标题']",
+      "[contenteditable='true'][data-placeholder*='标题']",
+      "[contenteditable='true'][aria-label*='标题']",
+      "[class*='title'] input",
+      "[class*='title'] textarea",
+      "[class*='title'][contenteditable='true']",
+      "[id*='title'] input",
+      "[id*='title'] textarea",
+      "[id*='title'][contenteditable='true']"
+    ];
+    const isVisible = (element: any) => {
+      const rect = element.getBoundingClientRect();
+      const style = win.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const candidates = selectors.flatMap((selector) => Array.from(doc.querySelectorAll(selector)));
+    const element = candidates.find(isVisible) as any;
+    if (!element) return false;
+    element.scrollIntoView?.({ block: "center", inline: "center" });
+    element.click?.();
+    element.focus?.();
+    const editable = element.closest?.("[contenteditable='true']") ?? element;
+    if (editable.tagName === "TEXTAREA" || editable.tagName === "INPUT") {
+      const prototype = editable.tagName === "TEXTAREA" ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+      if (setter) setter.call(editable, rawTitle);
+      else editable.value = rawTitle;
+      editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawTitle }));
+      editable.dispatchEvent(new win.Event("change", { bubbles: true }));
+      return true;
+    }
+    if (editable.getAttribute?.("contenteditable") === "true") {
+      editable.textContent = "";
+      editable.dispatchEvent(new win.InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: rawTitle }));
+      doc.execCommand("insertText", false, rawTitle);
+      editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawTitle }));
+      return true;
+    }
+    editable.textContent = rawTitle;
+    editable.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText", data: rawTitle }));
+    editable.dispatchEvent(new win.Event("change", { bubbles: true }));
+    return true;
+  }, title);
 }
 
 export function createWechatBrowserPublisher(options: WechatBrowserPublisherOptions = {}): WechatBrowserPublisher {
@@ -365,18 +467,7 @@ export function createWechatBrowserPublisher(options: WechatBrowserPublisherOpti
         };
       }
 
-      const titleFilled = await fillFirstVisible(
-        page,
-        [
-          "input[placeholder*='标题']",
-          "textarea[placeholder*='标题']",
-          "[contenteditable='true'][data-placeholder*='标题']",
-          "[contenteditable='true'][aria-label*='标题']",
-          "[id*='title']",
-          "[class*='title']"
-        ],
-        draft.title
-      );
+      const titleFilled = await fillWechatTitle(page, draft.title);
       if (!titleFilled) {
         return {
           status: "NEEDS_USER_ACTION",

@@ -58,7 +58,7 @@ function createFakePage(options?: { loggedIn?: boolean; accountNameRequired?: bo
       return state.url;
     },
     locator(selector: string) {
-      if (selector.includes("title") || selector.includes("标题")) return title;
+      if (selector.includes("activity-name") || selector.includes("title") || selector.includes("标题")) return title;
       return hidden;
     },
     getByPlaceholder() {
