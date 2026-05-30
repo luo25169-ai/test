@@ -54,7 +54,7 @@ export interface ZhihuBrowserPublisherOptions {
 const defaultProfileDir = resolve(process.cwd(), "../../.contentflow-browser/zhihu");
 const defaultChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_BROWSER_PORT ?? 9222);
-const managedProfileDir = process.env.CONTENTFLOW_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/zhihu-managed");
+const managedProfileDir = process.env.CONTENTFLOW_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/shared-managed");
 
 async function ensurePersistentPage(options: ZhihuBrowserPublisherOptions): Promise<BrowserPage> {
   if (options.openPage) return wrapPage(await options.openPage());
@@ -151,7 +151,11 @@ async function ensureManagedPage(browser: any): Promise<BrowserPage> {
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
   const pages = context.pages();
-  return wrapPage(pages[0] ?? (await context.newPage()));
+  const zhihuPage = pages.find((page: any) => {
+    const url = typeof page.url === "function" ? page.url() : "";
+    return url.includes("zhihu.com") || url.includes("zhuanlan.zhihu.com");
+  });
+  return wrapPage(zhihuPage ?? (await context.newPage()));
 }
 
 function wrapLocator(locator: any): BrowserLocator {
