@@ -37,6 +37,11 @@ const initialDraft: DraftContent = {
   images: [{ name: "cover.png", url: "https://example.com/cover.png", type: "image/png" }]
 };
 
+function mergeAdaptedResults(current: AdaptationResult[], nextItems: AdaptationResult[]) {
+  const nextPlatformIds = new Set(nextItems.map((item) => item.platformId));
+  return [...current.filter((item) => !nextPlatformIds.has(item.platformId)), ...nextItems];
+}
+
 function classNames(...items: Array<string | false | undefined>) {
   return items.filter(Boolean).join(" ");
 }
@@ -221,7 +226,7 @@ export default function App() {
     const response = await adaptContent(draft, platformIds, "rules");
     setAdapted((current) => {
       const retained = canReuseAdapted ? current.filter((item) => !platformIds.includes(item.platformId)) : [];
-      return [...retained, ...response.items];
+      return mergeAdaptedResults(retained, response.items);
     });
     setAdaptedDraftKey(currentDraftKey);
     setAdaptMode(response.mode);
@@ -250,7 +255,7 @@ export default function App() {
       const adaptedForPublish = await ensureAdaptedFor(platformIds);
       const task = await publishContent(draft, platformIds, adaptedForPublish, "browser");
       setTasks((current) => [task, ...current]);
-      setAdapted(task.adapted);
+      setAdapted((current) => mergeAdaptedResults(current, task.adapted));
       setAdaptedDraftKey(currentDraftKey);
       setPendingPublishPlatform(null);
       updateAccountStatusesFromTasks([task]);
