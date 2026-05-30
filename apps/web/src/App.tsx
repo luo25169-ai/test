@@ -79,6 +79,7 @@ function adaptationReport(draft: DraftContent, item: AdaptationResult) {
 
 const accountStatusesStorageKey = "contentflow.accountStatuses";
 const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
+const draftStorageKey = "contentflow.draft";
 
 const defaultAccountStatuses: Record<string, AccountStatus> = {
   wechat: "NEEDS_LOGIN",
@@ -110,11 +111,39 @@ function readStoredLoginOpenedPlatforms(): string[] {
   }
 }
 
+function readStoredDraft(): DraftContent {
+  try {
+    const raw = localStorage.getItem(draftStorageKey);
+    if (!raw) return initialDraft;
+    const parsed = JSON.parse(raw) as Partial<DraftContent>;
+    return {
+      title: typeof parsed.title === "string" ? parsed.title : initialDraft.title,
+      content: typeof parsed.content === "string" ? parsed.content : initialDraft.content,
+      tags: Array.isArray(parsed.tags) ? parsed.tags.filter((tag): tag is string => typeof tag === "string") : initialDraft.tags,
+      images: Array.isArray(parsed.images)
+        ? parsed.images.filter((image): image is DraftContent["images"][number] => typeof image?.name === "string" && typeof image?.url === "string")
+        : initialDraft.images
+    };
+  } catch {
+    return initialDraft;
+  }
+}
+
+function draftKey(draft: DraftContent): string {
+  return JSON.stringify({
+    title: draft.title,
+    content: draft.content,
+    tags: draft.tags,
+    images: draft.images.map((image) => ({ name: image.name, url: image.url, type: image.type ?? "" }))
+  });
+}
+
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
-  const [draft, setDraft] = useState<DraftContent>(initialDraft);
+  const [draft, setDraft] = useState<DraftContent>(readStoredDraft);
   const [selectedPlatforms, setSelectedPlatforms] = useState(platforms.map((platform) => platform.id));
   const [adapted, setAdapted] = useState<AdaptationResult[]>([]);
+  const [adaptedDraftKey, setAdaptedDraftKey] = useState<string | null>(null);
   const [adaptMode, setAdaptMode] = useState<"ai" | "rules">("rules");
   const [aiNotice, setAiNotice] = useState("");
   const [tasks, setTasks] = useState<PublishTask[]>([]);
@@ -130,7 +159,19 @@ export default function App() {
     () => adapted.find((item) => item.platformId === activePreview) ?? adapted[0],
     [activePreview, adapted]
   );
+  const currentDraftKey = useMemo(() => draftKey(draft), [draft]);
   const hasRunningTasks = useMemo(() => tasks.some((task) => task.status === "RUNNING"), [tasks]);
+
+  useEffect(() => {
+    localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  }, [draft]);
+
+  useEffect(() => {
+    if (adaptedDraftKey !== null && adaptedDraftKey !== currentDraftKey) {
+      setAdapted([]);
+      setAdaptedDraftKey(null);
+    }
+  }, [adaptedDraftKey, currentDraftKey]);
 
   useEffect(() => {
     localStorage.setItem(accountStatusesStorageKey, JSON.stringify(accountStatuses));
@@ -160,6 +201,7 @@ export default function App() {
     try {
       const response = await adaptContent(draft, selectedPlatforms);
       setAdapted(response.items);
+      setAdaptedDraftKey(currentDraftKey);
       setAdaptMode(response.mode);
       setAiNotice(response.aiError ? "AI 调用失败，已降级为规则适配。请检查火山方舟模型是否已开通。" : "");
       setActivePreview(response.items[0]?.platformId ?? "wechat");
@@ -172,14 +214,16 @@ export default function App() {
   }
 
   async function ensureAdaptedFor(platformIds: string[]) {
+    const canReuseAdapted = adaptedDraftKey === currentDraftKey;
     const missing = platformIds.some((platformId) => !adapted.some((item) => item.platformId === platformId));
-    if (!missing && adapted.length > 0) return adapted.filter((item) => platformIds.includes(item.platformId));
+    if (canReuseAdapted && !missing && adapted.length > 0) return adapted.filter((item) => platformIds.includes(item.platformId));
 
     const response = await adaptContent(draft, platformIds, "rules");
     setAdapted((current) => {
-      const retained = current.filter((item) => !platformIds.includes(item.platformId));
+      const retained = canReuseAdapted ? current.filter((item) => !platformIds.includes(item.platformId)) : [];
       return [...retained, ...response.items];
     });
+    setAdaptedDraftKey(currentDraftKey);
     setAdaptMode(response.mode);
     setAiNotice(response.aiError ? "AI 调用失败，已降级为规则适配。请检查火山方舟模型是否已开通。" : "");
     setActivePreview(response.items[0]?.platformId ?? activePreview);
@@ -207,6 +251,7 @@ export default function App() {
       const task = await publishContent(draft, platformIds, adaptedForPublish, "browser");
       setTasks((current) => [task, ...current]);
       setAdapted(task.adapted);
+      setAdaptedDraftKey(currentDraftKey);
       setPendingPublishPlatform(null);
       updateAccountStatusesFromTasks([task]);
       setView(nextView);
