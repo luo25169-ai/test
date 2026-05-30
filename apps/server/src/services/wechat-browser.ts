@@ -39,11 +39,9 @@ export interface WechatBrowserPublisherOptions {
 }
 
 const defaultChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_WECHAT_BROWSER_PORT ?? process.env.CONTENTFLOW_BROWSER_PORT ?? 9222);
+const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_WECHAT_BROWSER_PORT ?? 9223);
 const managedProfileDir =
-  process.env.CONTENTFLOW_WECHAT_BROWSER_PROFILE_DIR ??
-  process.env.CONTENTFLOW_BROWSER_PROFILE_DIR ??
-  resolve(process.cwd(), "../../.contentflow-browser/shared-managed");
+  process.env.CONTENTFLOW_WECHAT_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/wechat-managed");
 
 let persistentPage: WechatBrowserPage | null = null;
 let persistentPagePromise: Promise<WechatBrowserPage> | null = null;
@@ -186,11 +184,7 @@ async function ensureManagedPage(browser: any): Promise<WechatBrowserPage> {
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
   const pages = context.pages();
-  const wechatPage = pages.find((page: any) => {
-    const url = typeof page.url === "function" ? page.url() : "";
-    return url.includes("mp.weixin.qq.com");
-  });
-  return wrapPage(wechatPage ?? (await context.newPage()));
+  return wrapPage(pages[0] ?? (await context.newPage()));
 }
 
 async function ensurePersistentPage(options: WechatBrowserPublisherOptions): Promise<WechatBrowserPage> {

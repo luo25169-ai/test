@@ -37,11 +37,9 @@ export interface RednoteBrowserPublisherOptions {
 }
 
 const defaultChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_REDNOTE_BROWSER_PORT ?? process.env.CONTENTFLOW_BROWSER_PORT ?? 9222);
+const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_REDNOTE_BROWSER_PORT ?? 9225);
 const managedProfileDir =
-  process.env.CONTENTFLOW_REDNOTE_BROWSER_PROFILE_DIR ??
-  process.env.CONTENTFLOW_BROWSER_PROFILE_DIR ??
-  resolve(process.cwd(), "../../.contentflow-browser/shared-managed");
+  process.env.CONTENTFLOW_REDNOTE_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/rednote-managed");
 
 let persistentPage: RednoteBrowserPage | null = null;
 let persistentPagePromise: Promise<RednoteBrowserPage> | null = null;

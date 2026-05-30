@@ -36,11 +36,9 @@ export interface BilibiliBrowserPublisherOptions {
 }
 
 const defaultChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_BILIBILI_BROWSER_PORT ?? process.env.CONTENTFLOW_BROWSER_PORT ?? 9222);
+const managedRemoteDebuggingPort = Number(process.env.CONTENTFLOW_BILIBILI_BROWSER_PORT ?? 9224);
 const managedProfileDir =
-  process.env.CONTENTFLOW_BILIBILI_BROWSER_PROFILE_DIR ??
-  process.env.CONTENTFLOW_BROWSER_PROFILE_DIR ??
-  resolve(process.cwd(), "../../.contentflow-browser/shared-managed");
+  process.env.CONTENTFLOW_BILIBILI_BROWSER_PROFILE_DIR ?? resolve(process.cwd(), "../../.contentflow-browser/bilibili-managed");
 
 let persistentPage: BilibiliBrowserPage | null = null;
 let persistentPagePromise: Promise<BilibiliBrowserPage> | null = null;
@@ -186,11 +184,7 @@ async function ensureManagedPage(browser: any): Promise<BilibiliBrowserPage> {
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
   const pages = context.pages();
-  const bilibiliPage = pages.find((page: any) => {
-    const url = typeof page.url === "function" ? page.url() : "";
-    return url.includes("bilibili.com");
-  });
-  return wrapPage(bilibiliPage ?? (await context.newPage()));
+  return wrapPage(pages[0] ?? (await context.newPage()));
 }
 
 async function ensurePersistentPage(options: BilibiliBrowserPublisherOptions): Promise<BilibiliBrowserPage> {
