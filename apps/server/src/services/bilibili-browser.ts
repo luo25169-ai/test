@@ -8,6 +8,7 @@ export const bilibiliLoginUrl = "https://passport.bilibili.com/login";
 export const bilibiliDynamicUrl = "https://t.bilibili.com/";
 
 export interface BilibiliPublishDraft {
+  title: string;
   body: string;
   tags: string[];
   images: Array<{ name: string; url: string; type?: string }>;
@@ -333,6 +334,60 @@ async function fillBilibiliEditor(page: BilibiliBrowserPage, body: string): Prom
   return true;
 }
 
+async function fillBilibiliTitle(page: BilibiliBrowserPage, title: string): Promise<boolean> {
+  async function fillTitle(locator: BrowserLocator): Promise<void> {
+    await locator.click();
+    if (page.evaluate) {
+      await page.evaluate((text) => {
+        const doc = (globalThis as any).document;
+        const element = doc.activeElement;
+        if (!element) return false;
+        const editable = element.closest("[contenteditable='true']") ?? element;
+        if (editable.tagName === "TEXTAREA" || editable.tagName === "INPUT") {
+          editable.value = text;
+          editable.dispatchEvent(new Event("input", { bubbles: true }));
+          editable.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+        if (editable.nodeType === 1) {
+          editable.textContent = "";
+          editable.dispatchEvent(new (globalThis as any).InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: text }));
+          doc.execCommand("insertText", false, text);
+          editable.dispatchEvent(new (globalThis as any).InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+          return true;
+        }
+        return false;
+      }, title);
+      return;
+    }
+    if (page.keyboard) {
+      await page.keyboard.press("Meta+A");
+      await page.keyboard.type(title);
+      return;
+    }
+    await locator.fill(title);
+  }
+
+  const placeholder = await findFirstVisiblePlaceholder(page, ["好的标题更容易获得支持", "选填20字", "标题"]);
+  if (placeholder) {
+    await fillTitle(placeholder);
+    return true;
+  }
+
+  const locator = await findFirstVisibleLocator(page, [
+    "input[placeholder*='标题']",
+    "textarea[placeholder*='标题']",
+    "[placeholder*='标题']",
+    "[data-placeholder*='标题']",
+    "[aria-placeholder*='标题']",
+    "[contenteditable='true'][data-placeholder*='标题']",
+    "[contenteditable='true'][aria-placeholder*='标题']"
+  ]);
+  if (!locator) return false;
+  await fillTitle(locator);
+  return true;
+}
+
 export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisherOptions = {}): BilibiliBrowserPublisher {
   function resetPersistentPage(): void {
     persistentPage = null;
@@ -423,6 +478,8 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
         };
       }
 
+      const titleFilled = await fillBilibiliTitle(page, draft.title);
+
       if (!(await fillBilibiliEditor(page, draft.body))) {
         if (await isBilibiliLoginRequired(page)) {
           return {
@@ -438,7 +495,7 @@ export function createBilibiliBrowserPublisher(options: BilibiliBrowserPublisher
 
       return {
         status: "NEEDS_USER_ACTION",
-        message: "B站动态内容已填入，请确认内容后手动发布",
+        message: titleFilled ? "B站动态标题和内容已填入，请确认内容后手动发布" : "B站动态内容已填入，但没有找到标题输入框，请手动补充标题后发布",
         publishedUrl: page.url()
       };
     }

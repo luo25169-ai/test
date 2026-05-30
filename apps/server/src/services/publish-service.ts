@@ -166,6 +166,7 @@ async function publishWithBrowserExecutor(
         platformId: item.platformId,
         platform: item.platform,
         ...(await options.bilibiliPublisher.publish({
+          title: item.content.title,
           body: item.content.body,
           tags: item.content.tags,
           images: item.content.images

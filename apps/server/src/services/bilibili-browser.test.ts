@@ -30,6 +30,7 @@ function createHiddenLocator() {
 }
 
 function createFakePage(options?: { loggedIn?: boolean }) {
+  const title = createFakeLocator();
   const editor = createFakeLocator();
   const login = createFakeLocator();
   const hidden = createHiddenLocator();
@@ -38,6 +39,7 @@ function createFakePage(options?: { loggedIn?: boolean }) {
   };
   const navigations: string[] = [];
   return {
+    title,
     editor,
     login,
     navigations,
@@ -57,11 +59,13 @@ function createFakePage(options?: { loggedIn?: boolean }) {
       return state.url;
     },
     locator(selector: string) {
+      if (selector.includes("标题") || selector.includes("placeholder")) return title;
       if (selector.includes("contenteditable") || selector.includes("textarea") || selector.includes("editor")) return editor;
       if (!options?.loggedIn && selector.includes("login")) return login;
       return hidden;
     },
     getByPlaceholder(text: string) {
+      if (text.includes("标题") || text.includes("选填20") || text.includes("好的标题")) return title;
       if (text.includes("动态") || text.includes("说点")) return editor;
       return hidden;
     },
@@ -95,15 +99,17 @@ describe("bilibili browser publisher", () => {
     });
 
     const result = await publisher.publish({
+      title: "Bilibili title",
       body: "Bilibili body #AI",
       tags: ["AI"],
       images: []
     });
 
     expect(page.navigations).toContain(bilibiliDynamicUrl);
+    expect(page.title.fillCalls).toContain("Bilibili title");
     expect(page.editor.fillCalls).toContain("Bilibili body #AI");
     expect(result.status).toBe("NEEDS_USER_ACTION");
-    expect(result.message).toContain("动态内容已填入");
+    expect(result.message).toContain("动态标题和内容已填入");
   });
 
   it("prefers an existing authenticated Bilibili page from the user browser", async () => {
@@ -115,12 +121,14 @@ describe("bilibili browser publisher", () => {
     });
 
     const result = await publisher.publish({
+      title: "Bilibili title",
       body: "Bilibili body #AI",
       tags: ["AI"],
       images: []
     });
 
     expect(userPage.navigations).toContain(bilibiliDynamicUrl);
+    expect(userPage.title.fillCalls).toContain("Bilibili title");
     expect(userPage.editor.fillCalls).toContain("Bilibili body #AI");
     expect(managedPage.navigations).toHaveLength(0);
     expect(result.status).toBe("NEEDS_USER_ACTION");
@@ -133,6 +141,7 @@ describe("bilibili browser publisher", () => {
     });
 
     const result = await publisher.publish({
+      title: "Bilibili title",
       body: "Bilibili body #AI",
       tags: [],
       images: []
