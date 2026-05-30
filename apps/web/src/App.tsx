@@ -58,7 +58,7 @@ const defaultAccountStatuses: Record<string, AccountStatus> = {
   bilibili: "NEEDS_LOGIN",
   rednote: "NEEDS_LOGIN"
 };
-const manualLoginConfirmationPlatforms = new Set(["rednote"]);
+const manualLoginConfirmationPlatforms = new Set(platforms.map((platform) => platform.id));
 
 function readStoredAccountStatuses(): Record<string, AccountStatus> {
   try {
