@@ -48,6 +48,35 @@ function resultStatusClass(status: string) {
   return "text-red-700";
 }
 
+function textLength(text: string) {
+  return Array.from(text.trim()).length;
+}
+
+function deltaText(from: number, to: number) {
+  const delta = to - from;
+  if (delta === 0) return "持平";
+  return delta > 0 ? `+${delta}` : String(delta);
+}
+
+function platformToneOf(platformId: string) {
+  return platforms.find((platform) => platform.id === platformId)?.tone ?? "平台风格";
+}
+
+function adaptationReport(draft: DraftContent, item: AdaptationResult) {
+  const sourceTitleLength = textLength(draft.title);
+  const adaptedTitleLength = textLength(item.content.title);
+  const sourceBodyLength = textLength(draft.content);
+  const adaptedBodyLength = textLength(item.content.body);
+
+  return [
+    ["标题长度", `${sourceTitleLength} -> ${adaptedTitleLength} 字`, deltaText(sourceTitleLength, adaptedTitleLength)],
+    ["正文长度", `${sourceBodyLength} -> ${adaptedBodyLength} 字`, deltaText(sourceBodyLength, adaptedBodyLength)],
+    ["标签数量", `${draft.tags.length} -> ${item.content.tags.length} 个`, deltaText(draft.tags.length, item.content.tags.length)],
+    ["平台风格", platformToneOf(item.platformId), item.platform],
+    ["规则校验", item.validation.valid ? "通过" : item.validation.issues.join("；"), item.validation.valid ? "OK" : "需调整"]
+  ];
+}
+
 const accountStatusesStorageKey = "contentflow.accountStatuses";
 const loginOpenedPlatformsStorageKey = "contentflow.loginOpenedPlatforms";
 const publishModeStorageKey = "contentflow.publishMode";
@@ -289,6 +318,26 @@ export default function App() {
   const pendingPreview = pendingPublishPlatform
     ? adapted.find((item) => item.platformId === pendingPublishPlatform)
     : undefined;
+  const pendingAccountReady = pendingPreview ? accountStatuses[pendingPreview.platformId] === "CONNECTED" : false;
+  const pendingPreflight = pendingPreview
+    ? [
+        ["内容适配", "已生成平台版本", true],
+        ["平台校验", pendingPreview.validation.valid ? "校验通过" : pendingPreview.validation.issues.join("；"), pendingPreview.validation.valid],
+        ["账号状态", publishMode === "mock" ? "演示模式免登录" : pendingAccountReady ? "已连接账号" : "需要登录", publishMode === "mock" || pendingAccountReady],
+        ["发布模式", publishMode === "mock" ? "演示模式" : "真实发布", true],
+        [
+          "预计结果",
+          !pendingPreview.validation.valid
+            ? "需要先调整内容"
+            : publishMode === "mock"
+            ? "稳定模拟成功"
+            : pendingAccountReady
+            ? "进入真实发布流程"
+            : "需要先完成登录",
+          pendingPreview.validation.valid && (publishMode === "mock" || pendingAccountReady)
+        ]
+      ]
+    : [];
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -526,6 +575,24 @@ export default function App() {
                   <h2 className="mb-3 text-xl font-semibold">{activeContent.content.title}</h2>
                   <p className="mb-4 rounded-md bg-slate-50 p-3 text-sm text-muted">{activeContent.content.summary}</p>
                   <div className="whitespace-pre-wrap rounded-md border border-line p-4 text-sm leading-7">{activeContent.content.body}</div>
+                  <div className="mt-4 rounded-md border border-line bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold">平台适配对比报告</h3>
+                        <p className="text-xs text-muted">对比原文与当前平台版本的结构变化。</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-600">{activeContent.platform}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {adaptationReport(draft, activeContent).map(([label, value, delta]) => (
+                        <div key={label} className="rounded-md bg-white p-3">
+                          <div className="mb-1 text-xs text-muted">{label}</div>
+                          <div className="text-sm font-medium">{value}</div>
+                          <div className="mt-1 text-xs text-slate-500">{delta}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="grid h-80 place-items-center rounded-md border border-dashed border-line text-sm text-muted">
@@ -679,6 +746,33 @@ export default function App() {
               <p className="mb-4 rounded-md bg-slate-50 p-3 text-sm text-muted">{pendingPreview.content.summary}</p>
               <div className="whitespace-pre-wrap rounded-md border border-line p-4 text-sm leading-7">
                 {pendingPreview.content.body}
+              </div>
+              <div className="mt-4 rounded-md border border-line bg-slate-50 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <ShieldCheck size={16} className="text-slate-500" />
+                  <div>
+                    <h3 className="text-sm font-semibold">发布前智能体检</h3>
+                    <p className="text-xs text-muted">确认内容、账号和发布模式都已准备好。</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {pendingPreflight.map(([label, value, passed]) => (
+                    <div key={label as string} className="rounded-md bg-white p-3">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted">{label as string}</span>
+                        <span
+                          className={classNames(
+                            "rounded-full px-2 py-0.5 text-[11px]",
+                            passed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                          )}
+                        >
+                          {passed ? "READY" : "CHECK"}
+                        </span>
+                      </div>
+                      <div className="text-sm font-medium">{value as string}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
               {!pendingPreview.validation.valid && (
                 <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
